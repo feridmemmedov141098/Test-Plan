@@ -230,9 +230,11 @@ export class StrategyPrototype {
   private unitSelectionRingMaterial: THREE.MeshBasicMaterial | null = null
   private selectionBoxElement: HTMLDivElement | null = null
   private routeLine: THREE.Line | null = null
+  private readonly routeLines = new Map<string, THREE.Line>()
   private animationFrame = 0
   private selectedProvinceId: number | null = null
   private selectedUnitId: string | null = null
+  private isLeftPanning = false
   private isMiddleDragging = false
   private leftDrag: {
     pointerId: number
@@ -755,16 +757,29 @@ export class StrategyPrototype {
     }
 
     if (event.button === 0) {
-      this.leftDrag = {
-        pointerId: event.pointerId,
-        startX: event.clientX,
-        startY: event.clientY,
-        currentX: event.clientX,
-        currentY: event.clientY,
-        isSelecting: false,
-        addToSelection: event.shiftKey,
+      // Determine if clicking on a unit or province
+      this.updatePointer(event)
+      const hitUnit = this.camera ? this.pickUnit(event) : null
+      const hitProvince = !hitUnit && this.camera && this.provinceState ? this.pickProvince(event) : null
+
+      if (hitUnit || hitProvince || event.shiftKey) {
+        // Selection mode: unit click, province click, or shift+drag box select
+        this.leftDrag = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          currentX: event.clientX,
+          currentY: event.clientY,
+          isSelecting: false,
+          addToSelection: event.shiftKey,
+        }
+        this.container.setPointerCapture(event.pointerId)
+      } else {
+        // Empty space: start camera pan
+        this.isLeftPanning = true
+        this.lastPointer = { x: event.clientX, y: event.clientY }
+        this.container.setPointerCapture(event.pointerId)
       }
-      this.container.setPointerCapture(event.pointerId)
     }
   }
 
@@ -780,6 +795,17 @@ export class StrategyPrototype {
         this.updateSelectionBox(this.leftDrag)
       }
 
+      return
+    }
+
+    if (this.isLeftPanning && this.camera) {
+      const deltaX = event.clientX - this.lastPointer.x
+      const deltaY = event.clientY - this.lastPointer.y
+      const scale = 0.42 / this.camera.zoom
+      this.cameraTarget.x -= deltaX * scale
+      this.cameraTarget.z -= deltaY * scale
+      this.clampCameraTarget()
+      this.lastPointer = { x: event.clientX, y: event.clientY }
       return
     }
 
@@ -812,6 +838,12 @@ export class StrategyPrototype {
     }
 
     if (event.button === 0) {
+      if (this.isLeftPanning) {
+        this.isLeftPanning = false
+        this.container.releasePointerCapture(event.pointerId)
+        return
+      }
+
       if (this.leftDrag?.pointerId === event.pointerId) {
         const drag = this.leftDrag
         this.leftDrag = null
@@ -830,6 +862,7 @@ export class StrategyPrototype {
   }
 
   private readonly handlePointerLeave = (): void => {
+    this.isLeftPanning = false
     this.isMiddleDragging = false
     this.leftDrag = null
     this.hideSelectionBox()
@@ -890,45 +923,44 @@ export class StrategyPrototype {
     }
 
     const targetProvince = this.pickProvince(event)
-
-    if (!targetProvince) {
-      return
-    }
-
     let issuedOrders = 0
 
-    for (const unit of this.getSelectedUnits()) {
-      if (unit.manpower <= 0 || unit.status === 'inCombat') {
-        continue
+    if (targetProvince) {
+      for (const unit of this.getSelectedUnits()) {
+        if (unit.manpower <= 0 || unit.status === 'inCombat') {
+          continue
+        }
+
+        if (targetProvince.controllerCountryId !== unit.countryId && !areAtWar(unit.countryId, targetProvince.controllerCountryId)) {
+          continue
+        }
+
+        const path = this.pathfinding.findPath(unit.provinceId, targetProvince.id)
+
+        if (path.length === 0) {
+          continue
+        }
+
+        unit.routeProvinceIds = path
+        unit.route = path.map((provinceId) => this.provinceState!.getProvince(provinceId).centerWorld.clone().setY(UNIT_Y))
+        unit.routeIndex = 0
+        unit.status = 'moving'
+        unit.fortificationDays = 0
+        unit.fortifiedProvinceId = null
+        issuedOrders += 1
       }
-
-      if (targetProvince.controllerCountryId !== unit.countryId && !areAtWar(unit.countryId, targetProvince.controllerCountryId)) {
-        continue
-      }
-
-      const path = this.pathfinding.findPath(unit.provinceId, targetProvince.id)
-
-      if (path.length === 0) {
-        continue
-      }
-
-      unit.routeProvinceIds = path
-      unit.route = path.map((provinceId) => this.provinceState!.getProvince(provinceId).centerWorld.clone().setY(UNIT_Y))
-      unit.routeIndex = 0
-      unit.status = 'moving'
-      unit.fortificationDays = 0
-      unit.fortifiedProvinceId = null
-      issuedOrders += 1
     }
 
+    // Always deselect province on right-click
+    this.selectedProvinceId = null
+    this.setSelectedProvince(null)
+    this.updateSelectionVisuals()
+
     if (issuedOrders === 0) {
-      this.updateHud('No province route')
+      this.updateHud(targetProvince ? 'No province route' : 'Province deselected')
       return
     }
 
-    this.selectedProvinceId = targetProvince.id
-    this.setSelectedProvince(targetProvince.id)
-    this.updateSelectionVisuals()
     this.updateHud(issuedOrders > 1 ? `Move order issued to ${issuedOrders} units` : 'Move order issued')
   }
 
@@ -1366,18 +1398,43 @@ export class StrategyPrototype {
 
     const sources = this.getSupplySourceProvinces(unit.countryId)
     const unitProvince = this.provinceState.getProvince(unit.provinceId)
-    const targets = unitProvince.controllerCountryId === unit.countryId && !unitProvince.isContested
-      ? [unitProvince.id]
-      : unitProvince.neighbors.filter((provinceId) => {
-          const province = this.provinceState!.getProvince(provinceId)
-          return province.controllerCountryId === unit.countryId && !province.isContested
-        })
+    const isInFriendlyCombat = this.combatSystem.getActiveCombatForProvince(unitProvince.id)?.attackerCountryId === unit.countryId || this.combatSystem.getActiveCombatForProvince(unitProvince.id)?.defenderCountryId === unit.countryId
+
+    // If unit is fighting in enemy territory, supply trucks can deliver directly there
+    // Otherwise, they must stop at a neighboring friendly province
+    const targets: number[] = []
+    if (unitProvince.controllerCountryId === unit.countryId && !unitProvince.isContested) {
+      targets.push(unitProvince.id)
+    } else if (isInFriendlyCombat) {
+      targets.push(unitProvince.id)
+    }
+    for (const neighborId of unitProvince.neighbors) {
+      const neighbor = this.provinceState.getProvince(neighborId)
+      if (neighbor.controllerCountryId === unit.countryId && !neighbor.isContested) {
+        targets.push(neighborId)
+      }
+    }
+
+    // Remove duplicates
+    const uniqueTargets = [...new Set(targets)]
+    if (uniqueTargets.length === 0) {
+      return null
+    }
+
+    // Allow path through friendly territory OR enemy provinces with active friendly combat
+    const canEnter = (province: Province): boolean => {
+      if (province.controllerCountryId === unit.countryId && !province.isContested) {
+        return true
+      }
+      const combat = this.combatSystem.getActiveCombatForProvince(province.id)
+      return combat !== null && (combat.attackerCountryId === unit.countryId || combat.defenderCountryId === unit.countryId)
+    }
 
     let bestRoute: number[] | null = null
 
     for (const source of sources) {
-      for (const targetProvinceId of targets) {
-        const route = this.pathfinding.findPathWhere(source.id, targetProvinceId, (province) => province.controllerCountryId === unit.countryId && !province.isContested)
+      for (const targetProvinceId of uniqueTargets) {
+        const route = this.pathfinding.findPathWhere(source.id, targetProvinceId, canEnter)
 
         if (route.length > 0 && (!bestRoute || route.length < bestRoute.length)) {
           bestRoute = route
@@ -1452,38 +1509,128 @@ export class StrategyPrototype {
     }
 
     for (const combat of this.combatSystem.combats.values()) {
-      if (combat.elapsedHours % 2 !== 0) {
-        continue
-      }
-
       const province = this.provinceState.getProvince(combat.provinceId)
       const projection = combat.lastProjection
       const intensity = projection ? Math.min(3, Math.max(1, (projection.attacker.softAttack + projection.defender.softAttack + projection.attacker.hardAttack + projection.defender.hardAttack) / 45)) : 1
-      this.spawnBattleEffect(province.centerWorld, intensity)
+
+      // Alternate between explosions and gunfire for visual variety
+      if (combat.elapsedHours % 3 === 0) {
+        this.spawnBattleEffect(province.centerWorld, intensity)
+      } else if (combat.elapsedHours % 3 === 1) {
+        this.spawnGunfireEffect(province.centerWorld, intensity)
+      } else {
+        this.spawnBattleEffect(province.centerWorld, intensity * 0.7)
+      }
     }
   }
 
   private spawnBattleEffect(center: THREE.Vector3, intensity: number): void {
     const group = new THREE.Group()
-    const offset = new THREE.Vector3((Math.random() - 0.5) * 8, 3 + Math.random() * 2, (Math.random() - 0.5) * 8)
+    const spread = 10 + intensity * 3
+    const offset = new THREE.Vector3((Math.random() - 0.5) * spread, 1.5 + Math.random() * 2, (Math.random() - 0.5) * spread)
     group.position.copy(center.clone().add(offset))
+    group.userData.type = 'explosion'
+    group.userData.intensity = intensity
 
+    // Core flash — bright expanding sphere
     const flash = new THREE.Mesh(
-      new THREE.SphereGeometry(0.9 + intensity * 0.35, 10, 10),
-      new THREE.MeshBasicMaterial({ color: 0xffa53a, transparent: true, opacity: 0.9 }),
+      new THREE.SphereGeometry(0.3 + intensity * 0.15, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffe066, transparent: true, opacity: 1 }),
     )
+    flash.userData.isFlash = true
+
+    // Shockwave ring
+    const shockwave = new THREE.Mesh(
+      new THREE.RingGeometry(0.1, 0.4, 16),
+      new THREE.MeshBasicMaterial({ color: 0xffa500, transparent: true, opacity: 0.7, side: THREE.DoubleSide }),
+    )
+    shockwave.rotation.x = -Math.PI / 2
+    shockwave.userData.isShockwave = true
+
+    // Debris particles (small dark cubes)
+    const debrisCount = Math.floor(4 + intensity * 3)
+    for (let i = 0; i < debrisCount; i++) {
+      const debris = new THREE.Mesh(
+        new THREE.BoxGeometry(0.15, 0.15, 0.15),
+        new THREE.MeshBasicMaterial({ color: 0x2a2a2a, transparent: true, opacity: 0.9 }),
+      )
+      debris.userData.isDebris = true
+      debris.userData.velocity = new THREE.Vector3(
+        (Math.random() - 0.5) * 6,
+        Math.random() * 5 + 2,
+        (Math.random() - 0.5) * 6,
+      )
+      debris.userData.rotationSpeed = new THREE.Vector3(
+        (Math.random() - 0.5) * 8,
+        (Math.random() - 0.5) * 8,
+        (Math.random() - 0.5) * 8,
+      )
+      debris.userData.startOffset = Math.random() * 0.1
+      group.add(debris)
+    }
+
+    // Smoke puff
     const smoke = new THREE.Mesh(
-      new THREE.SphereGeometry(1.4 + intensity * 0.45, 10, 10),
-      new THREE.MeshBasicMaterial({ color: 0x1f2933, transparent: true, opacity: 0.28 }),
+      new THREE.SphereGeometry(0.8 + intensity * 0.3, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0x3a3a3a, transparent: true, opacity: 0.5 }),
     )
-    smoke.position.y += 0.8
-    group.add(flash, smoke)
+    smoke.userData.isSmoke = true
+
+    group.add(flash, shockwave, smoke)
     this.scene.add(group)
     this.battleEffects.push({
       id: `effect-${this.nextBattleEffectSerial++}`,
       group,
       age: 0,
-      duration: 1.1 + intensity * 0.2,
+      duration: 1.4 + intensity * 0.3,
+    })
+  }
+
+  private spawnGunfireEffect(center: THREE.Vector3, intensity: number): void {
+    const group = new THREE.Group()
+    const spread = 8 + intensity * 2
+    const offset = new THREE.Vector3((Math.random() - 0.5) * spread, 1.2 + Math.random() * 1.5, (Math.random() - 0.5) * spread)
+    group.position.copy(center.clone().add(offset))
+    group.userData.type = 'gunfire'
+
+    // Muzzle flash — small bright burst
+    const muzzleFlash = new THREE.Mesh(
+      new THREE.SphereGeometry(0.15 + intensity * 0.05, 6, 6),
+      new THREE.MeshBasicMaterial({ color: 0xfff5c2, transparent: true, opacity: 1 }),
+    )
+    muzzleFlash.userData.isMuzzle = true
+
+    // Tracer sparks
+    const sparkCount = Math.floor(3 + intensity * 2)
+    for (let i = 0; i < sparkCount; i++) {
+      const spark = new THREE.Mesh(
+        new THREE.SphereGeometry(0.06, 4, 4),
+        new THREE.MeshBasicMaterial({ color: 0xffcc44, transparent: true, opacity: 1 }),
+      )
+      spark.userData.isSpark = true
+      spark.userData.velocity = new THREE.Vector3(
+        (Math.random() - 0.5) * 4,
+        Math.random() * 3 + 1,
+        (Math.random() - 0.5) * 4,
+      )
+      spark.userData.startOffset = Math.random() * 0.05
+      group.add(spark)
+    }
+
+    // Small smoke wisp
+    const wisp = new THREE.Mesh(
+      new THREE.SphereGeometry(0.25 + intensity * 0.1, 6, 6),
+      new THREE.MeshBasicMaterial({ color: 0x555555, transparent: true, opacity: 0.3 }),
+    )
+    wisp.userData.isWisp = true
+
+    group.add(muzzleFlash, wisp)
+    this.scene.add(group)
+    this.battleEffects.push({
+      id: `effect-${this.nextBattleEffectSerial++}`,
+      group,
+      age: 0,
+      duration: 0.5 + intensity * 0.15,
     })
   }
 
@@ -1491,13 +1638,68 @@ export class StrategyPrototype {
     for (const effect of [...this.battleEffects]) {
       effect.age += delta
       const progress = Math.min(1, effect.age / effect.duration)
-      effect.group.scale.setScalar(1 + progress * 1.8)
+      const type = effect.group.userData.type as string
 
-      effect.group.traverse((object) => {
-        if (object instanceof THREE.Mesh && object.material instanceof THREE.MeshBasicMaterial) {
-          object.material.opacity = Math.max(0, object.material.opacity * (1 - progress * 0.12))
-        }
-      })
+      if (type === 'explosion') {
+        // Flash: rapid expand then fade
+        effect.group.traverse((object) => {
+          if (!(object instanceof THREE.Mesh)) return
+          const mat = object.material
+          if (!(mat instanceof THREE.MeshBasicMaterial)) return
+
+          if (object.userData.isFlash) {
+            const flashProgress = Math.min(1, effect.age / 0.25)
+            object.scale.setScalar(1 + flashProgress * 5)
+            mat.opacity = Math.max(0, 1 - flashProgress * 3)
+          } else if (object.userData.isShockwave) {
+            const waveProgress = Math.min(1, effect.age / 0.5)
+            object.scale.setScalar(1 + waveProgress * 8)
+            mat.opacity = Math.max(0, 0.7 - waveProgress * 1.2)
+          } else if (object.userData.isSmoke) {
+            object.scale.setScalar(1 + progress * 2.5)
+            mat.opacity = Math.max(0, 0.5 - progress * 0.5)
+          } else if (object.userData.isDebris) {
+            const startOffset = object.userData.startOffset ?? 0
+            const debrisProgress = Math.max(0, (effect.age - startOffset) / (effect.duration - startOffset))
+            if (debrisProgress > 0) {
+              const vel = object.userData.velocity as THREE.Vector3
+              object.position.x += vel.x * delta
+              object.position.y += (vel.y - debrisProgress * 12) * delta
+              object.position.z += vel.z * delta
+              object.rotation.x += object.userData.rotationSpeed.x * delta
+              object.rotation.y += object.userData.rotationSpeed.y * delta
+              object.rotation.z += object.userData.rotationSpeed.z * delta
+              mat.opacity = Math.max(0, 0.9 - debrisProgress * 1.2)
+            }
+          }
+        })
+      } else if (type === 'gunfire') {
+        // Gunfire: quick burst and fade
+        effect.group.traverse((object) => {
+          if (!(object instanceof THREE.Mesh)) return
+          const mat = object.material
+          if (!(mat instanceof THREE.MeshBasicMaterial)) return
+
+          if (object.userData.isMuzzle) {
+            const muzzleProgress = Math.min(1, effect.age / 0.12)
+            object.scale.setScalar(1 + muzzleProgress * 2)
+            mat.opacity = Math.max(0, 1 - muzzleProgress * 4)
+          } else if (object.userData.isSpark) {
+            const startOffset = object.userData.startOffset ?? 0
+            const sparkProgress = Math.max(0, (effect.age - startOffset) / (effect.duration - startOffset))
+            if (sparkProgress > 0) {
+              const vel = object.userData.velocity as THREE.Vector3
+              object.position.x += vel.x * delta
+              object.position.y += (vel.y - sparkProgress * 8) * delta
+              object.position.z += vel.z * delta
+              mat.opacity = Math.max(0, 1 - sparkProgress * 2)
+            }
+          } else if (object.userData.isWisp) {
+            object.scale.setScalar(1 + progress * 1.5)
+            mat.opacity = Math.max(0, 0.3 - progress * 0.4)
+          }
+        })
+      }
 
       if (progress >= 1) {
         this.scene.remove(effect.group)
@@ -1774,8 +1976,6 @@ export class StrategyPrototype {
   }
 
   private updateSelectionVisuals(): void {
-    const selectedUnit = this.units.find((unit) => unit.id === this.selectedUnitId)
-
     for (const unitId of [...this.unitSelectionRings.keys()]) {
       if (!this.selectedUnitIds.has(unitId)) {
         const ring = this.unitSelectionRings.get(unitId)!
@@ -1799,14 +1999,42 @@ export class StrategyPrototype {
       }
     }
 
-    if (this.routeLine && selectedUnit) {
-      const remainingRoute = selectedUnit.route.slice(selectedUnit.routeIndex)
-      const routePoints = remainingRoute.length > 0 ? [selectedUnit.position, ...remainingRoute] : []
-      this.routeLine.geometry.dispose()
-      this.routeLine.geometry = new THREE.BufferGeometry().setFromPoints(routePoints.map((point) => point.clone().setY(2.1)))
-    } else if (this.routeLine) {
-      this.routeLine.geometry.dispose()
-      this.routeLine.geometry = new THREE.BufferGeometry()
+    // Update route lines for all selected units
+    const selectedUnitIds = new Set(this.selectedUnitIds)
+
+    // Remove route lines for units no longer selected
+    for (const [unitId, line] of this.routeLines.entries()) {
+      if (!selectedUnitIds.has(unitId)) {
+        this.scene.remove(line)
+        line.geometry.dispose()
+        ;(line.material as THREE.Material).dispose()
+        this.routeLines.delete(unitId)
+      }
+    }
+
+    // Create/update route lines for all selected units with routes
+    for (const unit of this.getSelectedUnits()) {
+      const remainingRoute = unit.route.slice(unit.routeIndex)
+      const hasRoute = remainingRoute.length > 0
+
+      let line = this.routeLines.get(unit.id)
+
+      if (hasRoute) {
+        const routePoints = [unit.position, ...remainingRoute]
+        if (!line) {
+          line = new THREE.Line(
+            new THREE.BufferGeometry(),
+            new THREE.LineBasicMaterial({ color: 0xffd76c, transparent: true, opacity: 0.85 }),
+          )
+          this.routeLines.set(unit.id, line)
+          this.scene.add(line)
+        }
+        line.geometry.dispose()
+        line.geometry = new THREE.BufferGeometry().setFromPoints(routePoints.map((point) => point.clone().setY(2.1)))
+        line.visible = true
+      } else if (line) {
+        line.visible = false
+      }
     }
   }
 

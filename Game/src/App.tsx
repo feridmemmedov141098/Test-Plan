@@ -209,55 +209,6 @@ function App() {
 
       {/* Side Panel */}
       <aside className="side-panel">
-        {/* Country Overview */}
-        <div className="panel-section country-overview">
-          <div className="section-header">
-            <span className="header-icon">🏛</span>
-            <span className="header-title">NATIONS</span>
-          </div>
-          <div className="country-cards">
-            <div className="country-card azerbaijan">
-              <div className="country-flag"></div>
-              <div className="country-info">
-                <span className="country-name">Azerbaijan</span>
-                <div className="country-stats">
-                  {hudState.mapStats ? (
-                    <>
-                      <span className="stat">
-                        <span className="stat-icon">🗺</span>
-                        {hudState.mapStats.azProvinceCount}
-                      </span>
-                      <span className="stat">
-                        <span className="stat-icon">⚔</span>
-                        {hudState.mapStats.azUnitCount}
-                      </span>
-                    </>
-                  ) : <span className="loading">Loading...</span>}
-                </div>
-              </div>
-            </div>
-            <div className="country-card armenia">
-              <div className="country-flag"></div>
-              <div className="country-info">
-                <span className="country-name">Armenia</span>
-                <div className="country-stats">
-                  {hudState.mapStats ? (
-                    <>
-                      <span className="stat">
-                        <span className="stat-icon">🗺</span>
-                        {hudState.mapStats.amProvinceCount}
-                      </span>
-                      <span className="stat">
-                        <span className="stat-icon">⚔</span>
-                        {hudState.mapStats.amUnitCount}
-                      </span>
-                    </>
-                  ) : <span className="loading">Loading...</span>}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
 
         <div className="panel-section construction-panel">
           <div className="panel-tabs">
@@ -426,14 +377,14 @@ function App() {
         </div> : <UnitManagementPanel unit={hudState.selectedUnit} logistics={hudState.logistics} />}
 
         {/* Selected Province */}
+        {hudState.selectedProvince && (
         <div className="panel-section province-panel">
           <div className="section-header">
             <span className="header-icon">📍</span>
             <span className="header-title">PROVINCE</span>
           </div>
-          {hudState.selectedProvince ? (
-            <div className="province-details">
-              <div className="province-name">{hudState.selectedProvince.name}</div>
+          <div className="province-details">
+            <div className="province-name">{hudState.selectedProvince.name}</div>
               <div className="detail-row">
                 <span className="detail-label">Owner</span>
                 <span className={`detail-value ${hudState.selectedProvince.ownerName === 'Azerbaijan' ? 'az-color' : 'am-color'}`}>
@@ -479,10 +430,8 @@ function App() {
                 </span>
               </div>
             </div>
-          ) : (
-            <div className="empty-state">No province selected</div>
-          )}
-        </div>
+          </div>
+        )}
 
         {hudState.battleForecast && (
           <div className="panel-section battle-intel-panel">
@@ -703,10 +652,13 @@ function ResourceChip({ resourceId, value, income = 0, isLoading = false }: Reso
   const roundedIncome = Math.round(income)
 
   return (
-    <div className={`resource-chip ${resourceId}`} title={`${meta.label}: ${Math.round(value).toLocaleString()} (${formatIncome(roundedIncome)}/day)`}>
-      <ResourceIcon resourceId={resourceId} />
-      <span className="resource-amount">{isLoading ? '...' : compactNumber(value)}</span>
-      {!isLoading && <span className={`resource-income ${roundedIncome >= 0 ? 'positive' : 'negative'}`}>{formatIncome(roundedIncome)}</span>}
+    <div className="resource-chip-wrapper">
+      <div className={`resource-chip ${resourceId}`}>
+        <ResourceIcon resourceId={resourceId} />
+        <span className="resource-amount">{isLoading ? '...' : compactNumber(value)}</span>
+        {!isLoading && <span className={`resource-income ${roundedIncome >= 0 ? 'positive' : 'negative'}`}>{formatIncome(roundedIncome)}</span>}
+      </div>
+      <span className="resource-tooltip">{meta.label}: {Math.round(value).toLocaleString()} ({formatIncome(roundedIncome)}/day)</span>
     </div>
   )
 }
