@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Edit3, Factory, Flame, Fuel, Hammer, PencilRuler, Pickaxe, Plus, Save, Swords, Trash2, Users, Wheat, X, Zap } from 'lucide-react'
+import { Bomb, Edit3, Factory, Flame, Fuel, Hammer, PencilRuler, Pickaxe, Plus, Save, Swords, Trash2, Users, Wheat, X, Zap } from 'lucide-react'
 import './App.css'
-import { EQUIPMENT_CATEGORIES, EQUIPMENT_LABELS, type EquipmentCategory } from './game/equipment/EquipmentTypes'
+import { EQUIPMENT_CATEGORIES, EQUIPMENT_LABELS, EQUIPMENT_PRODUCTION_OUTPUT, type EquipmentCategory } from './game/equipment/EquipmentTypes'
 import { BUILDING_DEFINITIONS, type BuildingType } from './game/economy/ConstructionTypes'
 import type { ResourceId, ResourceYields } from './game/province/provinceTypes'
 import {
@@ -16,7 +16,7 @@ import {
 import { StrategyPrototype, type ActiveCombatOverlay, type PrototypeHudState, type TimeSpeed } from './rendering/StrategyPrototype'
 
 const PLAYER_COUNTRY_ID = 'azerbaijan'
-const RESOURCE_ORDER: ResourceId[] = ['manpower', 'industry', 'oil', 'gas', 'metal', 'food', 'energy']
+const RESOURCE_ORDER: ResourceId[] = ['manpower', 'industry', 'oil', 'gas', 'metal', 'food', 'energy', 'ammunition']
 const RESOURCE_META: Record<ResourceId, { label: string; Icon: typeof Users }> = {
   manpower: { label: 'Manpower', Icon: Users },
   industry: { label: 'Industry', Icon: Factory },
@@ -25,6 +25,7 @@ const RESOURCE_META: Record<ResourceId, { label: string; Icon: typeof Users }> =
   metal: { label: 'Metal', Icon: Pickaxe },
   food: { label: 'Food', Icon: Wheat },
   energy: { label: 'Energy', Icon: Zap },
+  ammunition: { label: 'Ammunition', Icon: Bomb },
 }
 
 const initialHudState: PrototypeHudState = {
@@ -48,6 +49,12 @@ const initialHudState: PrototypeHudState = {
   activeCombats: [],
   battleForecast: null,
   logistics: { supplyVehicleCount: 0, activeSupplyVehicleCount: 0 },
+  stockpile: {
+    equipmentStockpiles: { smallArms: 0, antiTankWeapons: 0, artillery: 0, tanks: 0, apcIfv: 0, supportVehicles: 0, supplyTrucks: 0 },
+    ammunition: 0,
+    food: 0,
+    productionRates: {} as Record<EquipmentCategory, number>,
+  },
   time: { day: 1, hour: 0, speed: 1 },
   status: 'Loading province map',
   mapStats: null,
@@ -61,6 +68,7 @@ function App() {
   const [isDesignerOpen, setIsDesignerOpen] = useState(false)
   const [editingTemplate, setEditingTemplate] = useState<DivisionTemplate | null>(null)
   const [deploymentProvinceId, setDeploymentProvinceId] = useState<number | null>(null)
+  const [activeTab, setActiveTab] = useState<'construction' | 'stockpile'>('construction')
   const playerEconomy = hudState.economy?.[PLAYER_COUNTRY_ID] ?? null
   const selectedProvinceId = hudState.selectedProvince?.id ?? null
   const activeDeploymentProvinceId = deploymentProvinceId ?? selectedProvinceId ?? hudState.training.validDeploymentProvinceIds[0] ?? null
@@ -252,68 +260,107 @@ function App() {
         </div>
 
         <div className="panel-section construction-panel">
-          <div className="section-header">
-            <Hammer className="section-icon-svg" size={16} />
-            <span className="header-title">CONSTRUCTION</span>
+          <div className="panel-tabs">
+            <button className={`panel-tab ${activeTab === 'construction' ? 'active' : ''}`} onClick={() => setActiveTab('construction')}>
+              <Hammer size={14} />
+              <span>Construction</span>
+            </button>
+            <button className={`panel-tab ${activeTab === 'stockpile' ? 'active' : ''}`} onClick={() => setActiveTab('stockpile')}>
+              <Factory size={14} />
+              <span>Stockpile</span>
+            </button>
           </div>
-          <div className="building-summary">
-            <span>Barracks {hudState.construction.playerBuildings.barracks}</span>
-            <span>Military Complexes {hudState.construction.playerBuildings.militaryComplex}</span>
-          </div>
-          <div className="construction-actions">
-            {(Object.keys(BUILDING_DEFINITIONS) as BuildingType[]).map((buildingType) => {
-              const building = BUILDING_DEFINITIONS[buildingType]
-              const disabled =
-                selectedProvinceId === null ||
-                !hudState.construction.validConstructionProvinceIds.includes(selectedProvinceId) ||
-                hudState.construction.jobs.length >= 2
 
-              return (
-                <button key={buildingType} className="management-btn" disabled={disabled} onClick={() => queueConstruction(buildingType)}>
-                  <Plus size={14} />
-                  <span>{building.name}</span>
-                </button>
-              )
-            })}
-          </div>
-          <div className="queue-list">
-            {hudState.construction.jobs.length > 0 ? hudState.construction.jobs.map((job) => (
-              <div key={job.id} className="queue-item">
-                <div>
-                  <span className="queue-title">{job.buildingName}</span>
-                  <span className="queue-subtitle">{job.provinceName}</span>
+          {activeTab === 'construction' ? (
+            <>
+              <div className="building-summary">
+                <span>Barracks {hudState.construction.playerBuildings.barracks}</span>
+                <span>Military Complexes {hudState.construction.playerBuildings.militaryComplex}</span>
+              </div>
+              <div className="construction-actions">
+                {(Object.keys(BUILDING_DEFINITIONS) as BuildingType[]).map((buildingType) => {
+                  const building = BUILDING_DEFINITIONS[buildingType]
+                  const disabled =
+                    selectedProvinceId === null ||
+                    !hudState.construction.validConstructionProvinceIds.includes(selectedProvinceId) ||
+                    hudState.construction.jobs.length >= 2
+
+                  return (
+                    <button key={buildingType} className="management-btn" disabled={disabled} onClick={() => queueConstruction(buildingType)}>
+                      <Plus size={14} />
+                      <span>{building.name}</span>
+                    </button>
+                  )
+                })}
+              </div>
+              <div className="queue-list">
+                {hudState.construction.jobs.length > 0 ? hudState.construction.jobs.map((job) => (
+                  <div key={job.id} className="queue-item">
+                    <div>
+                      <span className="queue-title">{job.buildingName}</span>
+                      <span className="queue-subtitle">{job.provinceName}</span>
+                    </div>
+                    <div className="queue-controls">
+                      <span>{job.daysRemaining}d</span>
+                      <button className="icon-btn" onClick={() => prototypeRef.current?.cancelConstruction(job.id)} title="Cancel construction">
+                        <X size={14} />
+                      </button>
+                    </div>
+                  </div>
+                )) : <div className="empty-state compact">No construction queued</div>}
+              </div>
+              <div className="production-block">
+                <span className="designer-column-title">Production Lines</span>
+                {playerEconomy && playerEconomy.productionLines.length > 0 ? playerEconomy.productionLines.map((line) => (
+                  <div key={line.id} className="production-line">
+                    <span>{line.id.replace(`${PLAYER_COUNTRY_ID}-`, '').toUpperCase()}</span>
+                    <select value={line.category} onChange={(event) => setProductionLine(line.id, event.target.value as EquipmentCategory)}>
+                      {EQUIPMENT_CATEGORIES.map((category) => (
+                        <option key={category} value={category}>{EQUIPMENT_LABELS[category]}</option>
+                      ))}
+                    </select>
+                    <span className="production-rate">{formatProductionRate(EQUIPMENT_PRODUCTION_OUTPUT[line.category])}</span>
+                  </div>
+                )) : <div className="empty-state compact">Build Military Complexes for production</div>}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="stockpile-section">
+                <span className="stockpile-section-title">Equipment Stockpile</span>
+                <div className="stockpile-grid">
+                  {EQUIPMENT_CATEGORIES.map((category) => {
+                    const count = Math.floor(hudState.stockpile.equipmentStockpiles[category])
+                    const rate = hudState.stockpile.productionRates[category] ?? 0
+                    const isShortage = playerEconomy && playerEconomy.trainingQueue.some((job) =>
+                      job.status === 'training' && (job.stats?.equipmentRequirements?.[category] ?? 0) > count
+                    )
+                    return (
+                      <div key={category} className={`stockpile-item ${isShortage ? 'shortage' : ''}`}>
+                        <span className="stockpile-name">{EQUIPMENT_LABELS[category]}</span>
+                        <span className="stockpile-count">{count}</span>
+                        {rate > 0 && <span className="stockpile-rate">+{rate}/day</span>}
+                      </div>
+                    )
+                  })}
                 </div>
-                <div className="queue-controls">
-                  <span>{job.daysRemaining}d</span>
-                  <button className="icon-btn" onClick={() => prototypeRef.current?.cancelConstruction(job.id)} title="Cancel construction">
-                    <X size={14} />
-                  </button>
+              </div>
+              <div className="stockpile-section">
+                <span className="stockpile-section-title">Supplies</span>
+                <div className="stockpile-grid">
+                  <div className="stockpile-item">
+                    <span className="stockpile-name">Food</span>
+                    <span className="stockpile-count">{Math.floor(hudState.stockpile.food)}</span>
+                  </div>
+                  <div className="stockpile-item">
+                    <span className="stockpile-name">Ammunition</span>
+                    <span className="stockpile-count">{Math.floor(hudState.stockpile.ammunition)}</span>
+                    {playerEconomy && <span className="stockpile-rate">+{Math.floor(playerEconomy.dailyIncome.industry * 0.8 + playerEconomy.dailyIncome.metal * 0.4)}/day</span>}
+                  </div>
                 </div>
               </div>
-            )) : <div className="empty-state compact">No construction queued</div>}
-          </div>
-          <div className="production-block">
-            <span className="designer-column-title">Production</span>
-            {playerEconomy && playerEconomy.productionLines.length > 0 ? playerEconomy.productionLines.map((line) => (
-              <div key={line.id} className="production-line">
-                <span>{line.id.replace(`${PLAYER_COUNTRY_ID}-`, '').toUpperCase()}</span>
-                <select value={line.category} onChange={(event) => setProductionLine(line.id, event.target.value as EquipmentCategory)}>
-                  {EQUIPMENT_CATEGORIES.map((category) => (
-                    <option key={category} value={category}>{EQUIPMENT_LABELS[category]}</option>
-                  ))}
-                </select>
-              </div>
-            )) : <div className="empty-state compact">Build Military Complexes for production</div>}
-            {playerEconomy && (
-              <div className="equipment-stockpile-grid">
-                {EQUIPMENT_CATEGORIES.map((category) => (
-                  <span key={category} title={EQUIPMENT_LABELS[category]}>
-                    {EQUIPMENT_LABELS[category]} {Math.floor(playerEconomy.equipmentStockpiles[category])}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
+            </>
+          )}
         </div>
 
         {!hudState.selectedUnit ? <div className="panel-section training-panel">
@@ -675,72 +722,124 @@ function ResourceIcon({ resourceId }: { resourceId: ResourceId }) {
 }
 
 function BattleIntelPanel({ forecast, combat, activeCombat }: BattleForecastPanelProps) {
+  const [expanded, setExpanded] = useState(false)
+  const [messageIndex, setMessageIndex] = useState(0)
+  const combatIdRef = useRef<string | null>(null)
+  const messagesRef = useRef(forecast.messages)
+  messagesRef.current = forecast.messages
+
   const winnerLabel = forecast.winner === 'attacker' ? 'Attacker advantage' : forecast.winner === 'defender' ? 'Defender holds' : 'Stalemate likely'
   const winnerClass = forecast.winner === 'attacker' ? 'attacker' : forecast.winner === 'defender' ? 'defender' : 'even'
-  const messageIndex = activeCombat ? Math.floor(activeCombat.elapsedHours / 6) % Math.max(1, forecast.messages.length) : 0
-  const currentMessage = forecast.messages[messageIndex] ?? forecast.reasons[0] ?? 'Commanders are assessing the battlefield.'
+
+  useEffect(() => {
+    if (!activeCombat) {
+      combatIdRef.current = null
+      setMessageIndex(0)
+      return
+    }
+
+    if (combatIdRef.current !== activeCombat.id) {
+      combatIdRef.current = activeCombat.id
+      setMessageIndex(0)
+    }
+
+    if (messagesRef.current.length <= 1) return
+
+    const interval = setInterval(() => {
+      setMessageIndex((prev) => (prev + 1) % messagesRef.current.length)
+    }, 8000)
+
+    return () => clearInterval(interval)
+  }, [activeCombat?.id])
+
+  const currentMessage = forecast.messages[messageIndex] ?? forecast.messages[0] ?? 'Commanders are assessing the battlefield.'
 
   return (
-    <div className="battle-intel-details">
-      {combat ? (
-        <div className="intel-flag-header">
+    <div className={`battle-intel-details ${expanded ? 'expanded' : 'minimal'}`}>
+      {combat && (
+        <div className="intel-flag-header" onClick={() => setExpanded(!expanded)}>
           <IntelSide side="attacker" countryId={combat.attacker.countryId} countryName={combat.attacker.countryName} unitCount={combat.attacker.unitCount} />
           <div className="intel-vs">VS</div>
           <IntelSide side="defender" countryId={combat.defender.countryId} countryName={combat.defender.countryName} unitCount={combat.defender.unitCount} />
         </div>
-      ) : (
-        <div className="intel-flag-header preview">
-          <div className="intel-side attacker">
-            <Swords size={18} />
-            <span>Attack Forecast</span>
-          </div>
-        </div>
       )}
-      <div className={`forecast-result ${winnerClass}`}>
-        <strong>{winnerLabel}</strong>
-        <span>{forecast.confidence}% confidence</span>
-      </div>
-      <div className="forecast-meta">
-        <span>{formatTerrainName(forecast.terrain)}</span>
-        <span>{forecast.estimatedHours >= 720 ? '30d+' : `${forecast.estimatedHours}h`}</span>
-      </div>
-      <div className="forecast-side-grid">
-        <ForecastSide title="Attacker" side={forecast.attacker} />
-        <ForecastSide title="Defender" side={forecast.defender} />
-      </div>
-      <div className="battle-message">
-        <span>Battlefield report</span>
-        <strong>{currentMessage}</strong>
-      </div>
-      <div className="forecast-matchups">
-        <div>
-          <span>Armor / Piercing</span>
-          <strong>{Math.round(forecast.attacker.piercing)} vs {Math.round(forecast.defender.armor)}</strong>
+
+      {!expanded ? (
+        <div className="battle-minimal-body" onClick={() => setExpanded(true)}>
+          {combat && (
+            <div className="battle-minimal-stats">
+              <div className="battle-minimal-side">
+                <span><strong>{combat.attacker.totalManpower}</strong> MP</span>
+                <span><strong>{Math.round(combat.attacker.avgOrganization)}</strong> ORG</span>
+                <span><strong>{combat.attacker.unitCount}</strong> UNITS</span>
+              </div>
+              <div className="battle-minimal-divider"></div>
+              <div className="battle-minimal-side">
+                <span><strong>{combat.defender.totalManpower}</strong> MP</span>
+                <span><strong>{Math.round(combat.defender.avgOrganization)}</strong> ORG</span>
+                <span><strong>{combat.defender.unitCount}</strong> UNITS</span>
+              </div>
+            </div>
+          )}
+          <div className="battle-minimal-forecast">{forecast.confidence}% FORECAST</div>
         </div>
-        <div>
-          <span>Logistics</span>
-          <strong>{Math.round(forecast.attacker.logisticsPenalty * 100)}% / {Math.round(forecast.defender.logisticsPenalty * 100)}%</strong>
-        </div>
-        <div>
-          <span>Fortification</span>
-          <strong>{Math.round(forecast.defender.fortificationLevel * 100)}%</strong>
-        </div>
-        <div>
-          <span>Supply</span>
-          <strong>{Math.round(forecast.attacker.supplyRatio * 100)}% / {Math.round(forecast.defender.supplyRatio * 100)}%</strong>
-        </div>
-        <div>
-          <span>Cut Off</span>
-          <strong>{forecast.attacker.encircledUnits} / {forecast.defender.encircledUnits}</strong>
-        </div>
-        <div>
-          <span>Lost Bns</span>
-          <strong>{forecast.attacker.destroyedBattalions + forecast.attacker.surrenderedBattalions} / {forecast.defender.destroyedBattalions + forecast.defender.surrenderedBattalions}</strong>
-        </div>
-      </div>
-      {forecast.reasons.length > 0 && (
-        <div className="forecast-reasons">
-          {forecast.messages.slice(0, 4).map((reason) => <span key={reason}>{reason}</span>)}
+      ) : (
+        <div className="battle-expanded-body">
+          <div className={`forecast-result ${winnerClass}`}>
+            <strong>{winnerLabel}</strong>
+            <span>{forecast.confidence}% confidence</span>
+          </div>
+          <div className="forecast-meta">
+            <span>{formatTerrainName(forecast.terrain)}</span>
+            <span>{forecast.estimatedHours >= 720 ? '30d+' : `${forecast.estimatedHours}h`}</span>
+          </div>
+          <div className="forecast-side-grid">
+            <div className="forecast-side">
+              <span className="forecast-side-title">Attacker</span>
+              <div><span>Score</span><strong>{Math.round(forecast.attacker.score)}</strong></div>
+              <div><span>Soft / Hard</span><strong>{Math.round(forecast.attacker.softAttack)} / {Math.round(forecast.attacker.hardAttack)}</strong></div>
+              <div><span>ORG</span><strong>{Math.round(forecast.attacker.organization)}/{Math.round(forecast.attacker.maxOrganization)}</strong></div>
+              <div><span>Losses</span><strong>{Math.round(forecast.attacker.projectedManpowerLoss)} MP</strong></div>
+            </div>
+            <div className="forecast-side">
+              <span className="forecast-side-title">Defender</span>
+              <div><span>Score</span><strong>{Math.round(forecast.defender.score)}</strong></div>
+              <div><span>Soft / Hard</span><strong>{Math.round(forecast.defender.softAttack)} / {Math.round(forecast.defender.hardAttack)}</strong></div>
+              <div><span>ORG</span><strong>{Math.round(forecast.defender.organization)}/{Math.round(forecast.defender.maxOrganization)}</strong></div>
+              <div><span>Losses</span><strong>{Math.round(forecast.defender.projectedManpowerLoss)} MP</strong></div>
+            </div>
+          </div>
+          <div className="battle-message">
+            <span>Battlefield report</span>
+            <strong>{currentMessage}</strong>
+          </div>
+          <div className="forecast-matchups">
+            <div>
+              <span>Armor / Piercing</span>
+              <strong>{Math.round(forecast.attacker.piercing)} vs {Math.round(forecast.defender.armor)}</strong>
+            </div>
+            <div>
+              <span>Logistics</span>
+              <strong>{Math.round(forecast.attacker.logisticsPenalty * 100)}% / {Math.round(forecast.defender.logisticsPenalty * 100)}%</strong>
+            </div>
+            <div>
+              <span>Fortification</span>
+              <strong>{Math.round(forecast.defender.fortificationLevel * 100)}%</strong>
+            </div>
+            <div>
+              <span>Supply</span>
+              <strong>{Math.round(forecast.attacker.supplyRatio * 100)}% / {Math.round(forecast.defender.supplyRatio * 100)}%</strong>
+            </div>
+            <div>
+              <span>Cut Off</span>
+              <strong>{forecast.attacker.encircledUnits} / {forecast.defender.encircledUnits}</strong>
+            </div>
+            <div>
+              <span>Lost Bns</span>
+              <strong>{forecast.attacker.destroyedBattalions + forecast.attacker.surrenderedBattalions} / {forecast.defender.destroyedBattalions + forecast.defender.surrenderedBattalions}</strong>
+            </div>
+          </div>
+          <button className="battle-collapse-btn" onClick={() => setExpanded(false)}>Close details</button>
         </div>
       )}
     </div>
@@ -756,18 +855,6 @@ function IntelSide({ side, countryId, countryName, unitCount }: { side: 'attacke
         <strong>{unitCount} units</strong>
       </div>
       <span className={`side-badge ${side === 'attacker' ? 'attacking' : 'defending'}`}>{side === 'attacker' ? 'ATK' : 'DEF'}</span>
-    </div>
-  )
-}
-
-function ForecastSide({ title, side }: { title: string; side: NonNullable<PrototypeHudState['battleForecast']>['attacker'] }) {
-  return (
-    <div className="forecast-side">
-      <span className="forecast-side-title">{title}</span>
-      <div><span>Score</span><strong>{Math.round(side.score)}</strong></div>
-      <div><span>Soft / Hard</span><strong>{Math.round(side.softAttack)} / {Math.round(side.hardAttack)}</strong></div>
-      <div><span>ORG</span><strong>{Math.round(side.organization)}/{Math.round(side.maxOrganization)}</strong></div>
-      <div><span>Losses</span><strong>{Math.round(side.projectedManpowerLoss)} MP</strong></div>
     </div>
   )
 }
@@ -1166,6 +1253,13 @@ function compactNumber(value: number): string {
 
 function formatIncome(value: number): string {
   return value >= 0 ? `+${value}` : `${value}`
+}
+
+function formatProductionRate(dailyOutput: number): string {
+  if (dailyOutput <= 0) return 'Idle'
+  if (dailyOutput >= 1) return `${dailyOutput}/day`
+  const daysPerUnit = Math.ceil(1 / dailyOutput)
+  return `1 per ${daysPerUnit}d`
 }
 
 export default App

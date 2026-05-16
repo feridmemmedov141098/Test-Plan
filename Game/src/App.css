@@ -252,6 +252,10 @@
   background: #fde047;
 }
 
+.resource-icon.ammunition {
+  background: #f87171;
+}
+
 .resource-amount {
   color: #fff;
   font-size: 13px;
@@ -448,7 +452,7 @@
 
 .production-line {
   display: grid;
-  grid-template-columns: 64px 1fr;
+  grid-template-columns: 64px 1fr auto;
   align-items: center;
   gap: 8px;
   color: #a8a49a;
@@ -997,6 +1001,93 @@
   gap: 10px;
 }
 
+.battle-intel-details.minimal {
+  gap: 0;
+}
+
+.battle-minimal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.battle-minimal-stats {
+  display: grid;
+  grid-template-columns: 1fr 38px 1fr;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.battle-minimal-side {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 4px;
+  min-width: 0;
+}
+
+.battle-minimal-side span {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #888;
+  text-align: center;
+}
+
+.battle-minimal-side span strong {
+  font-size: 13px;
+  font-weight: 800;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.battle-minimal-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #555;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 10px;
+  font-weight: 900;
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.battle-minimal-forecast {
+  padding: 5px 0;
+  color: #f7df72;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+
+.battle-collapse-btn {
+  padding: 7px 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: #a8a49a;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.battle-collapse-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #e8e4d9;
+}
+
 .intel-flag-header {
   display: grid;
   grid-template-columns: 1fr 38px 1fr;
@@ -1005,10 +1096,8 @@
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 9px;
   background: rgba(255, 255, 255, 0.035);
-}
-
-.intel-flag-header.preview {
-  display: block;
+  cursor: pointer;
+  user-select: none;
 }
 
 .intel-side {
@@ -1773,6 +1862,110 @@
   background: rgba(255, 255, 255, 0.03);
   border-left: 1px solid rgba(255, 255, 255, 0.06);
   border-right: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* ===== PANEL TABS ===== */
+.panel-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.panel-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  color: #a8a49a;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.panel-tab:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e8e4d9;
+}
+
+.panel-tab.active {
+  background: rgba(247, 223, 114, 0.12);
+  border-color: rgba(247, 223, 114, 0.25);
+  color: #f7df72;
+}
+
+/* ===== STOCKPILE PANEL ===== */
+.stockpile-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.stockpile-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.stockpile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.stockpile-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  transition: border-color 0.15s ease;
+}
+
+.stockpile-item.shortage {
+  border-color: rgba(248, 113, 113, 0.4);
+  background: rgba(248, 113, 113, 0.06);
+}
+
+.stockpile-name {
+  font-size: 10px;
+  font-weight: 700;
+  color: #a8a49a;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.stockpile-count {
+  font-size: 15px;
+  font-weight: 800;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.stockpile-rate {
+  font-size: 9px;
+  font-weight: 700;
+  color: #4ade80;
+  letter-spacing: 0.04em;
+}
+
+/* ===== PRODUCTION RATE ===== */
+.production-rate {
+  font-size: 10px;
+  font-weight: 700;
+  color: #4ade80;
+  text-align: right;
+  white-space: nowrap;
 }
 
 /* ===== RESPONSIVE ===== */

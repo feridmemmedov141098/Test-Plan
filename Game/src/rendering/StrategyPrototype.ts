@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { CombatSystem, type CombatInstance } from '../game/combat/CombatSystem'
 import type { BattleProjection } from '../game/combat/CombatSimulator'
-import type { EquipmentCategory } from '../game/equipment/EquipmentTypes'
+import { EQUIPMENT_CATEGORIES, EQUIPMENT_PRODUCTION_OUTPUT, type EquipmentCategory, type EquipmentStockpiles } from '../game/equipment/EquipmentTypes'
 import {
   BUILDING_DEFINITIONS,
   MAX_ACTIVE_CONSTRUCTION_JOBS,
@@ -107,6 +107,12 @@ export interface PrototypeHudState {
   logistics: {
     supplyVehicleCount: number
     activeSupplyVehicleCount: number
+  }
+  stockpile: {
+    equipmentStockpiles: EquipmentStockpiles
+    ammunition: number
+    food: number
+    productionRates: Record<EquipmentCategory, number>
   }
   activeCombat: CombatInstance | null
   activeCombats: ActiveCombatOverlay[]
@@ -285,6 +291,12 @@ export class StrategyPrototype {
         activeCombats: [],
         battleForecast: null,
         logistics: { supplyVehicleCount: 0, activeSupplyVehicleCount: 0 },
+        stockpile: {
+          equipmentStockpiles: { smallArms: 0, antiTankWeapons: 0, artillery: 0, tanks: 0, apcIfv: 0, supportVehicles: 0, supplyTrucks: 0 },
+          ammunition: 0,
+          food: 0,
+          productionRates: {} as Record<EquipmentCategory, number>,
+        },
         time: { day: 1, hour: 0, speed: 1 },
         status: 'Loading province map',
         mapStats: null,
@@ -347,6 +359,12 @@ export class StrategyPrototype {
         activeCombats: [],
         battleForecast: null,
         logistics: { supplyVehicleCount: 0, activeSupplyVehicleCount: 0 },
+        stockpile: {
+          equipmentStockpiles: { smallArms: 0, antiTankWeapons: 0, artillery: 0, tanks: 0, apcIfv: 0, supportVehicles: 0, supplyTrucks: 0 },
+          ammunition: 0,
+          food: 0,
+          productionRates: {} as Record<EquipmentCategory, number>,
+        },
         time: { day: this.currentDay, hour: this.currentHour, speed: this.timeSpeed },
         status: error instanceof Error ? error.message : 'Province map failed to load',
         mapStats: null,
@@ -1293,10 +1311,38 @@ export class StrategyPrototype {
       const unit = this.units.find((candidate) => candidate.id === vehicle.targetUnitId)
 
       if (unit && unit.manpower > 0) {
-        unit.supplyHours = Math.min(unit.maxSupplyHours, unit.supplyHours + vehicle.cargoHours)
+        const economy = this.economySystem.countries[unit.countryId]
+        const logisticsLoad = unit.supplyUse + unit.fuelUse
+        const foodNeeded = 2 + unit.manpower * 0.005
+        const ammoNeeded = 2 + logisticsLoad * 2
+
+        const foodAvailable = economy.stockpiles.food
+        const ammoAvailable = economy.stockpiles.ammunition
+
+        const foodToUse = Math.min(foodNeeded, foodAvailable)
+        const ammoToUse = Math.min(ammoNeeded, ammoAvailable)
+
+        const deliveryRatio = Math.min(
+          foodToUse / Math.max(1, foodNeeded),
+          ammoToUse / Math.max(1, ammoNeeded)
+        )
+
+        const actualSupplyHours = vehicle.cargoHours * deliveryRatio
+
+        economy.stockpiles.food -= foodToUse
+        economy.stockpiles.ammunition -= ammoToUse
+
+        unit.supplyHours = Math.min(unit.maxSupplyHours, unit.supplyHours + actualSupplyHours)
         unit.hoursOutOfSupply = 0
         unit.lastSupplySourceProvinceId = vehicle.sourceProvinceId
-        unit.recentCombatEvents = ['Supply convoy delivered ammunition, fuel, and rations', ...unit.recentCombatEvents].slice(0, 8)
+
+        if (deliveryRatio >= 0.95) {
+          unit.recentCombatEvents = ['Supply convoy delivered ammunition, fuel, and rations', ...unit.recentCombatEvents].slice(0, 8)
+        } else if (deliveryRatio >= 0.5) {
+          unit.recentCombatEvents = ['Supply convoy arrived with partial load', ...unit.recentCombatEvents].slice(0, 8)
+        } else {
+          unit.recentCombatEvents = ['Supply convoy arrived nearly empty', ...unit.recentCombatEvents].slice(0, 8)
+        }
       }
 
       vehicle.route = [...vehicle.route].reverse()
@@ -1877,6 +1923,17 @@ export class StrategyPrototype {
         supplyVehicleCount: this.supplyVehicles.length,
         activeSupplyVehicleCount: this.supplyVehicles.filter((vehicle) => vehicle.status !== 'available').length,
       },
+      stockpile: {
+        equipmentStockpiles: playerEconomy.equipmentStockpiles,
+        ammunition: playerEconomy.stockpiles.ammunition,
+        food: playerEconomy.stockpiles.food,
+        productionRates: Object.fromEntries(
+          EQUIPMENT_CATEGORIES.map((category) => [
+            category,
+            playerEconomy.productionLines.filter((line) => line.category === category).length * EQUIPMENT_PRODUCTION_OUTPUT[category],
+          ])
+        ) as Record<EquipmentCategory, number>,
+      },
       activeCombat,
       activeCombats,
       battleForecast,
@@ -1964,7 +2021,7 @@ export class StrategyPrototype {
     return overlays
   }
 
-  private buildBattleForecast(activeCombat: CombatInstance | null, selectedProvince: Province | null): BattleProjection | null {
+  private buildBattleForecast(activeCombat: CombatInstance | null, _selectedProvince: Province | null): BattleProjection | null {
     if (!this.provinceState) {
       return null
     }
@@ -1980,35 +2037,7 @@ export class StrategyPrototype {
       return activeCombat.lastProjection ?? this.combatSystem.getForecast(sides.attacker, sides.defender, province)
     }
 
-    if (!selectedProvince || this.selectedUnitIds.size === 0) {
-      return null
-    }
-
-    const attackers = this.getSelectedUnits().filter((unit) => unit.manpower > 0 && unit.countryId === PLAYER_COUNTRY_ID)
-
-    if (attackers.length === 0) {
-      return null
-    }
-
-    const defenderCountryId = selectedProvince.units
-      .map((unitId) => this.units.find((unit) => unit.id === unitId))
-      .filter((unit): unit is UnitState => Boolean(unit))
-      .find((unit) => unit.countryId !== attackers[0].countryId && unit.manpower > 0)?.countryId ?? selectedProvince.controllerCountryId
-
-    if (!areAtWar(attackers[0].countryId, defenderCountryId)) {
-      return null
-    }
-
-    const defenders = selectedProvince.units
-      .map((unitId) => this.units.find((unit) => unit.id === unitId))
-      .filter((unit): unit is UnitState => Boolean(unit))
-      .filter((unit) => unit.countryId === defenderCountryId && unit.manpower > 0)
-
-    if (defenders.length === 0) {
-      return null
-    }
-
-    return this.combatSystem.getForecast(attackers, defenders, selectedProvince)
+    return null
   }
 
   private setSelectedProvince(provinceId: number | null): void {

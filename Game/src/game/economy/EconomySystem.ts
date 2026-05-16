@@ -57,6 +57,10 @@ export class EconomySystem {
       for (const line of economy.productionLines) {
         economy.equipmentStockpiles[line.category] += EQUIPMENT_PRODUCTION_OUTPUT[line.category]
       }
+
+      // Military complexes produce ammunition from industrial capacity
+      const ammoProduction = Math.floor(economy.dailyIncome.industry * 0.8 + economy.dailyIncome.metal * 0.4)
+      economy.stockpiles.ammunition += ammoProduction
     }
   }
 
@@ -191,6 +195,7 @@ function createCountryEconomy(startingManpower: number, startingIndustry: number
   const equipmentStockpiles = createEmptyEquipmentStockpiles()
   stockpiles.manpower = startingManpower
   stockpiles.industry = startingIndustry
+  stockpiles.ammunition = startingIndustry * 4
   equipmentStockpiles.smallArms = startingIndustry * 3
   equipmentStockpiles.antiTankWeapons = Math.round(startingIndustry * 0.35)
   equipmentStockpiles.artillery = Math.round(startingIndustry * 0.25)

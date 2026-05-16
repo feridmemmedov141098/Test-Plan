@@ -1,6 +1,6 @@
 import type { CountryId, ProvinceMetadata, ResourceId, ResourceYields, TerrainType } from './provinceTypes'
 
-export const RESOURCE_IDS: ResourceId[] = ['oil', 'gas', 'metal', 'food', 'industry', 'energy', 'manpower']
+export const RESOURCE_IDS: ResourceId[] = ['oil', 'gas', 'metal', 'food', 'industry', 'energy', 'manpower', 'ammunition']
 
 const AZERBAIJAN_PROVINCE_NAMES: Record<string, string> = {
   AZABS: 'Abşeron',
@@ -88,6 +88,7 @@ const PRIMARY_RESOURCES: Record<ResourceId, string[]> = {
   metal: ['AZBAL', 'AZCUL', 'AZDAS', 'AZGAD', 'AZKAL', 'AZLAC', 'AZORD', 'AZQBI', 'AZSAH', 'AZSUS', 'AZXCI', 'AZXVD', 'AZZAN', 'AZZAQ'],
   energy: ['AZMI', 'AZSR'],
   industry: ['AZBA', 'AZGA', 'AZLA', 'AZNX', 'AZSM', 'AZYE', 'AZYEV'],
+  ammunition: [],
   food: [
     'AZAGA',
     'AZAGC',
@@ -265,6 +266,7 @@ export function createEmptyYields(): ResourceYields {
     industry: 0,
     energy: 0,
     manpower: 0,
+    ammunition: 0,
   }
 }
 
