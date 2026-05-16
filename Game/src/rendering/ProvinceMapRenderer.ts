@@ -11,11 +11,14 @@ import {
 const WORLD_SIZE = 210
 const EDGE_Y_OFFSET = 0.18
 const PROVINCE_Y_OFFSET = 0.02
+const POLITICAL_OVERLAY_Y_OFFSET = 0.08
 
 export class ProvinceMapRenderer {
   readonly object = new THREE.Group()
   readonly worldSize = WORLD_SIZE
   private provinceMeshes: THREE.Mesh[] = []
+  private politicalOverlayGroup = new THREE.Group()
+  private politicalOverlays = new Map<number, THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>>()
   private edgeGroup = new THREE.Group()
   private selectedProvinceId: number | null = null
 
@@ -34,7 +37,7 @@ export class ProvinceMapRenderer {
     source.scale.setScalar(scale)
     source.updateMatrixWorld(true)
 
-    const canonical = new Map<string, THREE.Mesh>()
+    const provinceCandidates = new Map<string, THREE.Mesh[]>()
 
     source.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) {
@@ -43,20 +46,29 @@ export class ProvinceMapRenderer {
 
       const baseName = normalizeProvinceName(object.name || object.geometry.name || '')
       const countryId = countryFromProvinceName(baseName)
-      const isCanonical = object.name === baseName
 
       object.visible = false
 
-      if (!countryId || !isCanonical || canonical.has(baseName)) {
+      if (!countryId) {
         return
       }
 
-      object.visible = true
-      object.castShadow = false
-      object.receiveShadow = true
-      object.frustumCulled = false
-      canonical.set(baseName, object)
+      const candidates = provinceCandidates.get(baseName) ?? []
+      candidates.push(object)
+      provinceCandidates.set(baseName, candidates)
     })
+
+    const canonical = new Map<string, THREE.Mesh>()
+
+    for (const [baseName, candidates] of provinceCandidates) {
+      const mesh = selectRenderableProvinceMesh(candidates)
+      mesh.visible = true
+      mesh.castShadow = false
+      mesh.receiveShadow = true
+      mesh.frustumCulled = false
+      preserveGlbMaterial(mesh)
+      canonical.set(baseName, mesh)
+    }
 
     const provinces = [...canonical.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
@@ -67,7 +79,6 @@ export class ProvinceMapRenderer {
         provinceBounds.getCenter(centerWorld)
         centerWorld.y += 0.8
         mesh.userData.provinceId = id
-        mesh.material = createProvinceMaterial(countryId, false)
         this.provinceMeshes.push(mesh)
 
         return {
@@ -85,8 +96,9 @@ export class ProvinceMapRenderer {
       })
 
     buildProvinceGraph(provinces)
+    this.createPoliticalOverlays(provinces)
     this.createProvinceEdges(provinces)
-    this.object.add(source, this.edgeGroup)
+    this.object.add(source, this.politicalOverlayGroup, this.edgeGroup)
 
     return provinces
   }
@@ -96,7 +108,13 @@ export class ProvinceMapRenderer {
   }
 
   updateProvinceColor(province: Province): void {
-    province.mesh.material = createProvinceMaterial(province.controllerCountryId, province.id === this.selectedProvinceId)
+    const overlay = this.politicalOverlays.get(province.id)
+
+    if (!overlay) {
+      return
+    }
+
+    updatePoliticalOverlayMaterial(overlay.material, province.controllerCountryId, province.id === this.selectedProvinceId)
   }
 
   setSelectedProvince(province: Province | null): void {
@@ -104,40 +122,74 @@ export class ProvinceMapRenderer {
     this.selectedProvinceId = province?.id ?? null
 
     if (previous !== null) {
-      const previousMesh = this.provinceMeshes.find((mesh) => mesh.userData.provinceId === previous)
+      const previousOverlay = this.politicalOverlays.get(previous)
 
-      if (previousMesh) {
-        const previousCountry = previousMesh.userData.controllerCountryId as Province['controllerCountryId'] | undefined
-        previousMesh.material = createProvinceMaterial(previousCountry ?? 'azerbaijan', false)
+      if (previousOverlay) {
+        const previousCountry = previousOverlay.userData.controllerCountryId as Province['controllerCountryId'] | undefined
+        updatePoliticalOverlayMaterial(previousOverlay.material, previousCountry ?? 'azerbaijan', false)
       }
     }
 
     if (province) {
-      province.mesh.material = createProvinceMaterial(province.controllerCountryId, true)
+      this.updateProvinceColor(province)
     }
   }
 
   refreshAllProvinceColors(provinces: Province[]): void {
     for (const province of provinces) {
       province.mesh.userData.controllerCountryId = province.controllerCountryId
+      this.politicalOverlays.get(province.id)!.userData.controllerCountryId = province.controllerCountryId
       this.updateProvinceColor(province)
     }
   }
 
   dispose(): void {
+    const disposedGeometries = new Set<THREE.BufferGeometry>()
+    const disposedMaterials = new Set<THREE.Material>()
+
     this.object.traverse((object) => {
       if (!(object instanceof THREE.Mesh || object instanceof THREE.LineSegments)) {
         return
       }
 
-      object.geometry.dispose()
+      if (!disposedGeometries.has(object.geometry)) {
+        object.geometry.dispose()
+        disposedGeometries.add(object.geometry)
+      }
 
       if (Array.isArray(object.material)) {
-        object.material.forEach((material) => material.dispose())
+        object.material.forEach((material) => {
+          if (!disposedMaterials.has(material)) {
+            material.dispose()
+            disposedMaterials.add(material)
+          }
+        })
       } else {
-        object.material.dispose()
+        if (!disposedMaterials.has(object.material)) {
+          object.material.dispose()
+          disposedMaterials.add(object.material)
+        }
       }
     })
+  }
+
+  private createPoliticalOverlays(provinces: Province[]): void {
+    for (const province of provinces) {
+      const overlay = new THREE.Mesh(
+        province.mesh.geometry,
+        createPoliticalOverlayMaterial(province.controllerCountryId, false),
+      )
+      province.mesh.updateWorldMatrix(true, false)
+      overlay.matrix.copy(province.mesh.matrixWorld)
+      overlay.matrix.elements[13] += POLITICAL_OVERLAY_Y_OFFSET + PROVINCE_Y_OFFSET
+      overlay.matrixAutoUpdate = false
+      overlay.renderOrder = 2
+      overlay.frustumCulled = false
+      overlay.userData.provinceId = province.id
+      overlay.userData.controllerCountryId = province.controllerCountryId
+      this.politicalOverlays.set(province.id, overlay)
+      this.politicalOverlayGroup.add(overlay)
+    }
   }
 
   private createProvinceEdges(provinces: Province[]): void {
@@ -155,17 +207,75 @@ export class ProvinceMapRenderer {
   }
 }
 
-function createProvinceMaterial(countryId: Province['controllerCountryId'], isSelected: boolean): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({
+function preserveGlbMaterial(mesh: THREE.Mesh): void {
+  const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+
+  for (const material of materials) {
+    material.side = THREE.DoubleSide
+    material.needsUpdate = true
+  }
+}
+
+function selectRenderableProvinceMesh(candidates: THREE.Mesh[]): THREE.Mesh {
+  return [...candidates].sort((left, right) => scoreProvinceMesh(right) - scoreProvinceMesh(left))[0]
+}
+
+function scoreProvinceMesh(mesh: THREE.Mesh): number {
+  let score = 0
+
+  if (/_mesh(?:\.\d+)?$/i.test(mesh.name)) {
+    score += 1_000_000
+  }
+
+  if (hasTextureMap(mesh.material)) {
+    score += 100_000
+  }
+
+  if (mesh.geometry.attributes.uv) {
+    score += 10_000
+  }
+
+  score += mesh.geometry.attributes.position?.count ?? 0
+
+  return score
+}
+
+function hasTextureMap(material: THREE.Material | THREE.Material[]): boolean {
+  return getMaterialList(material).some((candidate) => 'map' in candidate && candidate.map instanceof THREE.Texture)
+}
+
+function getMaterialList(material: THREE.Material | THREE.Material[]): THREE.Material[] {
+  return Array.isArray(material) ? material : [material]
+}
+
+function createPoliticalOverlayMaterial(
+  countryId: Province['controllerCountryId'],
+  isSelected: boolean,
+): THREE.MeshBasicMaterial {
+  const material = new THREE.MeshBasicMaterial({
     color: COUNTRY_COLORS[countryId],
-    roughness: 0.86,
-    metalness: 0,
-    emissive: isSelected ? 0xffe28a : 0x000000,
-    emissiveIntensity: isSelected ? 0.34 : 0,
     side: THREE.DoubleSide,
     transparent: true,
-    opacity: isSelected ? 0.98 : 0.86,
+    opacity: isSelected ? 0.58 : 0.36,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
   })
+  material.blending = THREE.NormalBlending
+  material.needsUpdate = true
+
+  return material
+}
+
+function updatePoliticalOverlayMaterial(
+  material: THREE.MeshBasicMaterial,
+  countryId: Province['controllerCountryId'],
+  isSelected: boolean,
+): void {
+  material.color.setHex(COUNTRY_COLORS[countryId])
+  material.opacity = isSelected ? 0.58 : 0.36
+  material.needsUpdate = true
 }
 
 function buildProvinceGraph(provinces: Province[]): void {
