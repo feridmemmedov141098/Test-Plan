@@ -20,6 +20,16 @@
   height: 100%;
 }
 
+.map-selection-box {
+  position: absolute;
+  z-index: 5;
+  display: none;
+  pointer-events: none;
+  border: 1px solid rgba(247, 223, 114, 0.95);
+  background: rgba(247, 223, 114, 0.16);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35), inset 0 0 18px rgba(247, 223, 114, 0.12);
+}
+
 /* ===== TOP BAR ===== */
 .top-bar {
   position: absolute;
@@ -176,6 +186,96 @@
 .top-bar-right {
   display: flex;
   align-items: center;
+  gap: 16px;
+}
+
+.resource-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+}
+
+.resource-chip {
+  display: grid;
+  grid-template-columns: 26px minmax(34px, auto);
+  grid-template-rows: 15px 13px;
+  align-items: center;
+  column-gap: 7px;
+  min-width: 74px;
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 7px;
+}
+
+.resource-icon {
+  grid-row: 1 / 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  color: #0a0c08;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+}
+
+.resource-icon.manpower {
+  background: #7dd3fc;
+}
+
+.resource-icon.industry {
+  background: #c4b5fd;
+}
+
+.resource-icon.oil {
+  background: #94a3b8;
+}
+
+.resource-icon.gas {
+  background: #67e8f9;
+}
+
+.resource-icon.metal {
+  background: #d6d3d1;
+}
+
+.resource-icon.food {
+  background: #86efac;
+}
+
+.resource-icon.energy {
+  background: #fde047;
+}
+
+.resource-amount {
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.resource-income {
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.resource-income.positive {
+  color: #4ade80;
+}
+
+.resource-income.negative {
+  color: #f87171;
 }
 
 .stat-badge {
@@ -423,11 +523,18 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
+  padding: 4px 8px 4px 4px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
   font-size: 12px;
+}
+
+.yield-item .resource-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  font-size: 7px;
 }
 
 .yield-name {
@@ -834,6 +941,20 @@
 
 /* ===== RESPONSIVE ===== */
 @media (max-width: 1024px) {
+  .top-bar {
+    flex-wrap: wrap;
+  }
+
+  .top-bar-right {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .resource-strip {
+    max-width: calc(100vw - 180px);
+    overflow-x: auto;
+  }
+
   .side-panel {
     width: 280px;
   }
@@ -851,6 +972,10 @@
   .top-bar-right {
     width: 100%;
     justify-content: center;
+  }
+
+  .resource-strip {
+    max-width: 100%;
   }
 
   .side-panel {

@@ -1,6 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import './App.css'
+import type { ResourceId, ResourceYields } from './game/province/provinceTypes'
 import { StrategyPrototype, type ActiveCombatOverlay, type PrototypeHudState, type TimeSpeed } from './rendering/StrategyPrototype'
+
+const PLAYER_COUNTRY_ID = 'azerbaijan'
+const RESOURCE_ORDER: ResourceId[] = ['manpower', 'industry', 'oil', 'gas', 'metal', 'food', 'energy']
+const RESOURCE_META: Record<ResourceId, { label: string; icon: string }> = {
+  manpower: { label: 'Manpower', icon: 'MP' },
+  industry: { label: 'Industry', icon: 'IN' },
+  oil: { label: 'Oil', icon: 'OL' },
+  gas: { label: 'Gas', icon: 'GS' },
+  metal: { label: 'Metal', icon: 'MT' },
+  food: { label: 'Food', icon: 'FD' },
+  energy: { label: 'Energy', icon: 'EN' },
+}
 
 const initialHudState: PrototypeHudState = {
   isLoading: true,
@@ -18,6 +31,8 @@ function App() {
   const mountRef = useRef<HTMLDivElement | null>(null)
   const prototypeRef = useRef<StrategyPrototype | null>(null)
   const [hudState, setHudState] = useState<PrototypeHudState>(initialHudState)
+  const playerEconomy = hudState.economy?.[PLAYER_COUNTRY_ID] ?? null
+  const showLegacyEconomyPanel: boolean = false
 
   useEffect(() => {
     const mount = mountRef.current
@@ -103,6 +118,20 @@ function App() {
           </div>
         </div>
         <div className="top-bar-right">
+          <div className="resource-strip" aria-label="Player resources">
+            {playerEconomy
+              ? RESOURCE_ORDER.map((resourceId) => (
+                  <ResourceChip
+                    key={resourceId}
+                    resourceId={resourceId}
+                    value={playerEconomy.stockpiles[resourceId]}
+                    income={playerEconomy.dailyIncome[resourceId]}
+                  />
+                ))
+              : RESOURCE_ORDER.map((resourceId) => (
+                  <ResourceChip key={resourceId} resourceId={resourceId} value={0} income={0} isLoading />
+                ))}
+          </div>
           <div className="stat-badge">
             <span className="badge-label">Provinces</span>
             <span className="badge-value">{hudState.mapStats ? hudState.mapStats.provinceCount.toLocaleString() : '...'}</span>
@@ -310,7 +339,7 @@ function App() {
         )}
 
         {/* Economy */}
-        {hudState.economy && (
+        {showLegacyEconomyPanel && hudState.economy && (
           <div className="panel-section">
             <div className="section-header">
               <span className="header-icon">💰</span>
@@ -322,11 +351,11 @@ function App() {
                 <div className="economy-data">
                   <div className="detail-row">
                     <span className="detail-label">Daily Income</span>
-                    <span className="detail-value">{formatYields(hudState.economy.azerbaijan.dailyIncome)}</span>
+                    <span className="detail-value">{formatYields(hudState.economy!.azerbaijan.dailyIncome)}</span>
                   </div>
                   <div className="detail-row">
                     <span className="detail-label">Stockpiles</span>
-                    <span className="detail-value">{formatYields(hudState.economy.azerbaijan.stockpiles)}</span>
+                    <span className="detail-value">{formatYields(hudState.economy!.azerbaijan.stockpiles)}</span>
                   </div>
                 </div>
               </div>
@@ -335,11 +364,11 @@ function App() {
                 <div className="economy-data">
                   <div className="detail-row">
                     <span className="detail-label">Daily Income</span>
-                    <span className="detail-value">{formatYields(hudState.economy.armenia.dailyIncome)}</span>
+                    <span className="detail-value">{formatYields(hudState.economy!.armenia.dailyIncome)}</span>
                   </div>
                   <div className="detail-row">
                     <span className="detail-label">Stockpiles</span>
-                    <span className="detail-value">{formatYields(hudState.economy.armenia.stockpiles)}</span>
+                    <span className="detail-value">{formatYields(hudState.economy!.armenia.stockpiles)}</span>
                   </div>
                 </div>
               </div>
@@ -368,6 +397,34 @@ function App() {
 
 interface BattlePopupProps {
   combat: ActiveCombatOverlay
+}
+
+interface ResourceChipProps {
+  resourceId: ResourceId
+  value: number
+  income?: number
+  isLoading?: boolean
+}
+
+function ResourceChip({ resourceId, value, income = 0, isLoading = false }: ResourceChipProps) {
+  const meta = RESOURCE_META[resourceId]
+  const roundedIncome = Math.round(income)
+
+  return (
+    <div className={`resource-chip ${resourceId}`} title={`${meta.label}: ${Math.round(value).toLocaleString()} (${formatIncome(roundedIncome)}/day)`}>
+      <ResourceIcon resourceId={resourceId} />
+      <span className="resource-amount">{isLoading ? '...' : compactNumber(value)}</span>
+      {!isLoading && <span className={`resource-income ${roundedIncome >= 0 ? 'positive' : 'negative'}`}>{formatIncome(roundedIncome)}</span>}
+    </div>
+  )
+}
+
+function ResourceIcon({ resourceId }: { resourceId: ResourceId }) {
+  return (
+    <span className={`resource-icon ${resourceId}`} aria-hidden="true">
+      {RESOURCE_META[resourceId].icon}
+    </span>
+  )
 }
 
 function BattlePopup({ combat }: BattlePopupProps) {
@@ -443,16 +500,31 @@ function formatYields(yields: Record<string, number>): string {
     .join(', ')
 }
 
-function formatYieldsDetailed(yields: Record<string, number>): React.ReactNode {
-  const entries = Object.entries(yields).filter(([, value]) => Math.abs(value) > 0.01)
+function formatYieldsDetailed(yields: ResourceYields): React.ReactNode {
+  const entries = RESOURCE_ORDER.filter((resourceId) => Math.abs(yields[resourceId]) > 0.01)
   if (entries.length === 0) return <span className="no-yields">None</span>
   
-  return entries.map(([resource, value]) => (
-    <span key={resource} className="yield-item">
-      <span className="yield-name">{resource}</span>
-      <span className="yield-value">{Math.round(value)}</span>
+  return entries.map((resourceId) => (
+    <span key={resourceId} className="yield-item" title={RESOURCE_META[resourceId].label}>
+      <ResourceIcon resourceId={resourceId} />
+      <span className="yield-name">{RESOURCE_META[resourceId].label}</span>
+      <span className="yield-value">{Math.round(yields[resourceId])}</span>
     </span>
   ))
+}
+
+function compactNumber(value: number): string {
+  const rounded = Math.round(value)
+
+  if (Math.abs(rounded) >= 1000) {
+    return `${(rounded / 1000).toFixed(rounded >= 10000 ? 0 : 1)}k`
+  }
+
+  return rounded.toString()
+}
+
+function formatIncome(value: number): string {
+  return value >= 0 ? `+${value}` : `${value}`
 }
 
 export default App

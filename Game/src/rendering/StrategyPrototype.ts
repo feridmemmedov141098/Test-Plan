@@ -103,16 +103,29 @@ export class StrategyPrototype {
   private readonly units: UnitState[] = []
   private readonly unitGroups = new Map<string, THREE.Group>()
   private readonly unitHitMeshes: THREE.Object3D[] = []
+  private readonly selectedUnitIds = new Set<string>()
+  private readonly unitSelectionRings = new Map<string, THREE.Mesh>()
   private renderer: THREE.WebGLRenderer | null = null
   private camera: THREE.OrthographicCamera | null = null
   private provinceState: ProvinceState | null = null
   private pathfinding: ProvincePathfindingSystem | null = null
-  private unitSelectionRing: THREE.Mesh | null = null
+  private unitSelectionRingGeometry: THREE.TorusGeometry | null = null
+  private unitSelectionRingMaterial: THREE.MeshBasicMaterial | null = null
+  private selectionBoxElement: HTMLDivElement | null = null
   private routeLine: THREE.Line | null = null
   private animationFrame = 0
   private selectedProvinceId: number | null = null
   private selectedUnitId: string | null = null
   private isMiddleDragging = false
+  private leftDrag: {
+    pointerId: number
+    startX: number
+    startY: number
+    currentX: number
+    currentY: number
+    isSelecting: boolean
+    addToSelection: boolean
+  } | null = null
   private lastPointer = { x: 0, y: 0 }
   private simHourAccumulator = 0
   private currentDay = 1
@@ -204,6 +217,7 @@ export class StrategyPrototype {
     this.container.removeEventListener('wheel', this.handleWheel)
     this.container.removeEventListener('contextmenu', this.handleContextMenu)
     this.mapRenderer.dispose()
+    this.selectionBoxElement?.remove()
     this.scene.traverse((object) => {
       if (!(object instanceof THREE.Mesh || object instanceof THREE.Line)) {
         return
@@ -262,18 +276,18 @@ export class StrategyPrototype {
   private createSelectionMeshes(): void {
     const ringGeometry = new THREE.TorusGeometry(1.6, 0.06, 8, 52)
     ringGeometry.rotateX(Math.PI / 2)
-    this.unitSelectionRing = new THREE.Mesh(
-      ringGeometry,
-      new THREE.MeshBasicMaterial({ color: 0xf7df72, transparent: true, opacity: 0.92 }),
-    )
-    this.unitSelectionRing.visible = false
-    this.scene.add(this.unitSelectionRing)
+    this.unitSelectionRingGeometry = ringGeometry
+    this.unitSelectionRingMaterial = new THREE.MeshBasicMaterial({ color: 0xf7df72, transparent: true, opacity: 0.92 })
 
     this.routeLine = new THREE.Line(
       new THREE.BufferGeometry(),
       new THREE.LineBasicMaterial({ color: 0xffd76c, transparent: true, opacity: 0.94 }),
     )
     this.scene.add(this.routeLine)
+
+    this.selectionBoxElement = document.createElement('div')
+    this.selectionBoxElement.className = 'map-selection-box'
+    this.container.appendChild(this.selectionBoxElement)
   }
 
   private createUnits(): void {
@@ -383,10 +397,38 @@ export class StrategyPrototype {
       this.isMiddleDragging = true
       this.lastPointer = { x: event.clientX, y: event.clientY }
       this.container.setPointerCapture(event.pointerId)
+      return
+    }
+
+    if (event.button === 0) {
+      this.leftDrag = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        currentX: event.clientX,
+        currentY: event.clientY,
+        isSelecting: false,
+        addToSelection: event.shiftKey,
+      }
+      this.container.setPointerCapture(event.pointerId)
     }
   }
 
   private readonly handlePointerMove = (event: PointerEvent): void => {
+    if (this.leftDrag?.pointerId === event.pointerId) {
+      this.leftDrag.currentX = event.clientX
+      this.leftDrag.currentY = event.clientY
+
+      const movedDistance = Math.hypot(event.clientX - this.leftDrag.startX, event.clientY - this.leftDrag.startY)
+
+      if (movedDistance >= 6) {
+        this.leftDrag.isSelecting = true
+        this.updateSelectionBox(this.leftDrag)
+      }
+
+      return
+    }
+
     if (!this.isMiddleDragging || !this.camera) {
       return
     }
@@ -408,6 +450,18 @@ export class StrategyPrototype {
     }
 
     if (event.button === 0) {
+      if (this.leftDrag?.pointerId === event.pointerId) {
+        const drag = this.leftDrag
+        this.leftDrag = null
+        this.hideSelectionBox()
+        this.container.releasePointerCapture(event.pointerId)
+
+        if (drag.isSelecting) {
+          this.selectUnitsInScreenRect(drag)
+          return
+        }
+      }
+
       this.handleLeftClick(event)
     }
 
@@ -418,6 +472,8 @@ export class StrategyPrototype {
 
   private readonly handlePointerLeave = (): void => {
     this.isMiddleDragging = false
+    this.leftDrag = null
+    this.hideSelectionBox()
   }
 
   private readonly handleWheel = (event: WheelEvent): void => {
@@ -439,19 +495,25 @@ export class StrategyPrototype {
     const unitId = this.pickUnit(event)
 
     if (unitId) {
-      this.selectedUnitId = unitId
+      if (event.shiftKey) {
+        this.toggleUnitSelection(unitId)
+      } else {
+        this.setSelectedUnits([unitId], unitId)
+      }
       const unit = this.units.find((entry) => entry.id === unitId)
       this.selectedProvinceId = unit?.provinceId ?? null
       this.setSelectedProvince(this.selectedProvinceId)
       this.updateSelectionVisuals()
-      this.updateHud('Unit selected')
+      this.updateHud(this.selectedUnitIds.size > 1 ? `${this.selectedUnitIds.size} units selected` : 'Unit selected')
       return
     }
 
     const province = this.pickProvince(event)
 
     if (province) {
-      this.selectedUnitId = null
+      if (!event.shiftKey) {
+        this.clearUnitSelection()
+      }
       this.selectedProvinceId = province.id
       this.setSelectedProvince(province.id)
       this.updateSelectionVisuals()
@@ -460,42 +522,49 @@ export class StrategyPrototype {
   }
 
   private handleRightClick(event: PointerEvent): void {
-    if (!this.provinceState || !this.pathfinding || !this.selectedUnitId) {
+    if (!this.provinceState || !this.pathfinding || this.selectedUnitIds.size === 0) {
       return
     }
 
     const targetProvince = this.pickProvince(event)
-    const unit = this.units.find((entry) => entry.id === this.selectedUnitId)
 
-    if (!targetProvince || !unit || unit.manpower <= 0) {
+    if (!targetProvince) {
       return
     }
 
-    if (unit.status === 'inCombat') {
-      this.updateHud('Unit is in combat')
-      return
+    let issuedOrders = 0
+
+    for (const unit of this.getSelectedUnits()) {
+      if (unit.manpower <= 0 || unit.status === 'inCombat') {
+        continue
+      }
+
+      if (targetProvince.controllerCountryId !== unit.countryId && !areAtWar(unit.countryId, targetProvince.controllerCountryId)) {
+        continue
+      }
+
+      const path = this.pathfinding.findPath(unit.provinceId, targetProvince.id)
+
+      if (path.length === 0) {
+        continue
+      }
+
+      unit.routeProvinceIds = path
+      unit.route = path.map((provinceId) => this.provinceState!.getProvince(provinceId).centerWorld.clone().setY(UNIT_Y))
+      unit.routeIndex = 0
+      unit.status = 'moving'
+      issuedOrders += 1
     }
 
-    if (targetProvince.controllerCountryId !== unit.countryId && !areAtWar(unit.countryId, targetProvince.controllerCountryId)) {
-      this.updateHud('Target country is not at war')
-      return
-    }
-
-    const path = this.pathfinding.findPath(unit.provinceId, targetProvince.id)
-
-    if (path.length === 0) {
+    if (issuedOrders === 0) {
       this.updateHud('No province route')
       return
     }
 
-    unit.routeProvinceIds = path
-    unit.route = path.map((provinceId) => this.provinceState!.getProvince(provinceId).centerWorld.clone().setY(UNIT_Y))
-    unit.routeIndex = 0
-    unit.status = 'moving'
     this.selectedProvinceId = targetProvince.id
     this.setSelectedProvince(targetProvince.id)
     this.updateSelectionVisuals()
-    this.updateHud('Move order issued')
+    this.updateHud(issuedOrders > 1 ? `Move order issued to ${issuedOrders} units` : 'Move order issued')
   }
 
   private pickUnit(event: PointerEvent): string | null {
@@ -528,6 +597,126 @@ export class StrategyPrototype {
     const rect = this.container.getBoundingClientRect()
     this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
     this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
+  }
+
+  private updateSelectionBox(drag: NonNullable<StrategyPrototype['leftDrag']>): void {
+    if (!this.selectionBoxElement) {
+      return
+    }
+
+    const containerRect = this.container.getBoundingClientRect()
+    const left = Math.min(drag.startX, drag.currentX) - containerRect.left
+    const top = Math.min(drag.startY, drag.currentY) - containerRect.top
+    const width = Math.abs(drag.currentX - drag.startX)
+    const height = Math.abs(drag.currentY - drag.startY)
+
+    this.selectionBoxElement.style.display = 'block'
+    this.selectionBoxElement.style.left = `${left}px`
+    this.selectionBoxElement.style.top = `${top}px`
+    this.selectionBoxElement.style.width = `${width}px`
+    this.selectionBoxElement.style.height = `${height}px`
+  }
+
+  private hideSelectionBox(): void {
+    if (this.selectionBoxElement) {
+      this.selectionBoxElement.style.display = 'none'
+    }
+  }
+
+  private selectUnitsInScreenRect(drag: NonNullable<StrategyPrototype['leftDrag']>): void {
+    if (!this.camera) {
+      return
+    }
+
+    const containerRect = this.container.getBoundingClientRect()
+    const left = Math.min(drag.startX, drag.currentX) - containerRect.left
+    const right = Math.max(drag.startX, drag.currentX) - containerRect.left
+    const top = Math.min(drag.startY, drag.currentY) - containerRect.top
+    const bottom = Math.max(drag.startY, drag.currentY) - containerRect.top
+    const unitIds: string[] = []
+
+    for (const unit of this.units) {
+      if (unit.manpower <= 0) {
+        continue
+      }
+
+      const screenPosition = this.getScreenPosition(unit.position)
+
+      if (
+        screenPosition.x >= left &&
+        screenPosition.x <= right &&
+        screenPosition.y >= top &&
+        screenPosition.y <= bottom
+      ) {
+        unitIds.push(unit.id)
+      }
+    }
+
+    if (unitIds.length === 0) {
+      if (!drag.addToSelection) {
+        this.clearUnitSelection()
+        this.updateSelectionVisuals()
+        this.updateHud('No units selected')
+      }
+      return
+    }
+
+    if (drag.addToSelection) {
+      for (const unitId of unitIds) {
+        this.selectedUnitIds.add(unitId)
+      }
+      this.selectedUnitId = unitIds.at(-1) ?? this.selectedUnitId
+    } else {
+      this.setSelectedUnits(unitIds, unitIds[0])
+    }
+
+    const selectedUnit = this.units.find((unit) => unit.id === this.selectedUnitId)
+    this.selectedProvinceId = selectedUnit?.provinceId ?? null
+    this.setSelectedProvince(this.selectedProvinceId)
+    this.updateSelectionVisuals()
+    this.updateHud(this.selectedUnitIds.size > 1 ? `${this.selectedUnitIds.size} units selected` : 'Unit selected')
+  }
+
+  private getScreenPosition(worldPosition: THREE.Vector3): { x: number; y: number } {
+    const projected = worldPosition.clone().project(this.camera!)
+    const containerRect = this.container.getBoundingClientRect()
+
+    return {
+      x: (projected.x * 0.5 + 0.5) * containerRect.width,
+      y: (-projected.y * 0.5 + 0.5) * containerRect.height,
+    }
+  }
+
+  private setSelectedUnits(unitIds: string[], primaryUnitId = unitIds[0] ?? null): void {
+    this.selectedUnitIds.clear()
+
+    for (const unitId of unitIds) {
+      this.selectedUnitIds.add(unitId)
+    }
+
+    this.selectedUnitId = primaryUnitId
+  }
+
+  private toggleUnitSelection(unitId: string): void {
+    if (this.selectedUnitIds.has(unitId)) {
+      this.selectedUnitIds.delete(unitId)
+      this.selectedUnitId = this.selectedUnitIds.values().next().value ?? null
+      return
+    }
+
+    this.selectedUnitIds.add(unitId)
+    this.selectedUnitId = unitId
+  }
+
+  private clearUnitSelection(): void {
+    this.selectedUnitIds.clear()
+    this.selectedUnitId = null
+  }
+
+  private getSelectedUnits(): UnitState[] {
+    return [...this.selectedUnitIds]
+      .map((unitId) => this.units.find((unit) => unit.id === unitId))
+      .filter((unit): unit is UnitState => Boolean(unit))
   }
 
   private readonly animate = (): void => {
@@ -714,11 +903,26 @@ export class StrategyPrototype {
   private updateSelectionVisuals(): void {
     const selectedUnit = this.units.find((unit) => unit.id === this.selectedUnitId)
 
-    if (this.unitSelectionRing) {
-      this.unitSelectionRing.visible = Boolean(selectedUnit)
+    for (const unitId of [...this.unitSelectionRings.keys()]) {
+      if (!this.selectedUnitIds.has(unitId)) {
+        const ring = this.unitSelectionRings.get(unitId)!
+        this.scene.remove(ring)
+        this.unitSelectionRings.delete(unitId)
+      }
+    }
 
-      if (selectedUnit) {
-        this.unitSelectionRing.position.set(selectedUnit.position.x, 1.25, selectedUnit.position.z)
+    if (this.unitSelectionRingGeometry && this.unitSelectionRingMaterial) {
+      for (const unit of this.getSelectedUnits()) {
+        let ring = this.unitSelectionRings.get(unit.id)
+
+        if (!ring) {
+          ring = new THREE.Mesh(this.unitSelectionRingGeometry, this.unitSelectionRingMaterial)
+          this.unitSelectionRings.set(unit.id, ring)
+          this.scene.add(ring)
+        }
+
+        ring.visible = unit.manpower > 0
+        ring.position.set(unit.position.x, 1.25, unit.position.z)
       }
     }
 
@@ -727,6 +931,9 @@ export class StrategyPrototype {
       const routePoints = remainingRoute.length > 0 ? [selectedUnit.position, ...remainingRoute] : []
       this.routeLine.geometry.dispose()
       this.routeLine.geometry = new THREE.BufferGeometry().setFromPoints(routePoints.map((point) => point.clone().setY(2.1)))
+    } else if (this.routeLine) {
+      this.routeLine.geometry.dispose()
+      this.routeLine.geometry = new THREE.BufferGeometry()
     }
   }
 
