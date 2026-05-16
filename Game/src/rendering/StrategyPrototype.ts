@@ -1,5 +1,7 @@
 import * as THREE from 'three'
 import { CombatSystem, type CombatInstance } from '../game/combat/CombatSystem'
+import type { BattleProjection } from '../game/combat/CombatSimulator'
+import type { EquipmentCategory } from '../game/equipment/EquipmentTypes'
 import {
   BUILDING_DEFINITIONS,
   MAX_ACTIVE_CONSTRUCTION_JOBS,
@@ -15,12 +17,11 @@ import {
   calculateDivisionStats,
   createStarterDivisionTemplates,
   MAX_BATTALIONS_PER_TEMPLATE,
-  NEUTRAL_TERRAIN_PROFILE,
   type DivisionNode,
   type DivisionTemplate,
   type TrainingJob,
 } from '../game/units/DivisionDesignerTypes'
-import type { UnitState } from '../game/units/UnitTypes'
+import { buildUnitCombatFields, type UnitState } from '../game/units/UnitTypes'
 import { ProvinceMapRenderer } from './ProvinceMapRenderer'
 import { UnitModelFactory } from './UnitModelFactory'
 
@@ -55,9 +56,36 @@ export interface PrototypeHudState {
     maxOrganization: number
     equipment: number
     maxEquipment: number
+    softAttack: number
+    hardAttack: number
     attack: number
     defense: number
+    breakthrough: number
+    armor: number
+    piercing: number
+    hardness: number
+    maneuverability: number
+    supplyUse: number
+    fuelUse: number
     reliability: number
+    fortificationDays: number
+    fortificationLevel: number
+    supplyHours: number
+    maxSupplyHours: number
+    hoursOutOfSupply: number
+    encircledHours: number
+    isEncircled: boolean
+    battalions: Array<{
+      name: string
+      status: string
+      manpower: number
+      maxManpower: number
+      equipment: number
+      maxEquipment: number
+      organization: number
+      maxOrganization: number
+    }>
+    recentCombatEvents: string[]
     reinforcementDelayHours: number
   } | null
   economy: EconomyState | null
@@ -76,8 +104,13 @@ export interface PrototypeHudState {
     trainingSlots: number
     activeTrainingCount: number
   }
+  logistics: {
+    supplyVehicleCount: number
+    activeSupplyVehicleCount: number
+  }
   activeCombat: CombatInstance | null
   activeCombats: ActiveCombatOverlay[]
+  battleForecast: BattleProjection | null
   time: {
     day: number
     hour: number
@@ -115,9 +148,31 @@ export interface ActiveCombatOverlay {
     unitCount: number
   }
   advantage: 'attacker' | 'defender' | 'even'
+  confidence: number
+  terrain: string
 }
 
 type HudCallback = (state: PrototypeHudState) => void
+
+interface SupplyVehicleState {
+  id: string
+  countryId: CountryId
+  sourceProvinceId: number
+  targetUnitId: string | null
+  position: THREE.Vector3
+  routeProvinceIds: number[]
+  route: THREE.Vector3[]
+  routeIndex: number
+  status: 'available' | 'toUnit' | 'returning'
+  cargoHours: number
+}
+
+interface BattleEffect {
+  id: string
+  group: THREE.Group
+  age: number
+  duration: number
+}
 
 const BASE_CAMERA_HEIGHT = 190
 const UNIT_Y = 2.2
@@ -125,6 +180,12 @@ const SIM_HOURS_PER_SECOND = 6
 const PLAYER_COUNTRY_ID: CountryId = 'azerbaijan'
 const MILITARY_COMPLEX_DAILY_EQUIPMENT = 25
 const TRAINING_REFUND_MULTIPLIER = 0.5
+const MOVEMENT_SPEED_MULTIPLIER = 0.2
+const FORTIFICATION_DAYS_TO_MAX = 7
+const MAX_SUPPLY_HOURS = 72
+const SUPPLY_DISPATCH_THRESHOLD = 46
+const SUPPLY_DELIVERY_HOURS = 42
+const SUPPLY_VEHICLE_SPEED = 36
 
 export class StrategyPrototype {
   private readonly container: HTMLDivElement
@@ -145,6 +206,9 @@ export class StrategyPrototype {
   private readonly unitHitMeshes: THREE.Object3D[] = []
   private readonly selectedUnitIds = new Set<string>()
   private readonly unitSelectionRings = new Map<string, THREE.Mesh>()
+  private readonly supplyVehicles: SupplyVehicleState[] = []
+  private readonly supplyVehicleGroups = new Map<string, THREE.Mesh>()
+  private readonly battleEffects: BattleEffect[] = []
   private renderer: THREE.WebGLRenderer | null = null
   private camera: THREE.OrthographicCamera | null = null
   private provinceState: ProvinceState | null = null
@@ -178,6 +242,8 @@ export class StrategyPrototype {
   private nextTrainingJobId = 1
   private nextUnitSerial = 1
   private nextTemplateSerial = 1
+  private nextSupplyVehicleSerial = 1
+  private nextBattleEffectSerial = 1
   private readonly HUD_UPDATE_INTERVAL = 0.15
 
   constructor(container: HTMLDivElement, setHudState: HudCallback) {
@@ -210,6 +276,8 @@ export class StrategyPrototype {
         },
         activeCombat: null,
         activeCombats: [],
+        battleForecast: null,
+        logistics: { supplyVehicleCount: 0, activeSupplyVehicleCount: 0 },
         time: { day: 1, hour: 0, speed: 1 },
         status: 'Loading province map',
         mapStats: null,
@@ -236,9 +304,12 @@ export class StrategyPrototype {
 
       this.initializeDivisionTemplates()
       this.initializeStartingBuildings()
+      this.economySystem.ensureProductionSlots(PLAYER_COUNTRY_ID, this.getPlayerBuildingCounts().militaryComplex)
+      this.economySystem.ensureProductionSlots('armenia', this.getBuildingCountsForCountry('armenia').militaryComplex)
       this.createSelectionMeshes()
       this.createUnits()
       this.economySystem.tickDaily(this.provinceState.provinces)
+      this.absorbSupplyTruckStockpiles()
       this.addEventListeners()
       this.resize()
       this.updateHud('Map ready')
@@ -267,6 +338,8 @@ export class StrategyPrototype {
         },
         activeCombat: null,
         activeCombats: [],
+        battleForecast: null,
+        logistics: { supplyVehicleCount: 0, activeSupplyVehicleCount: 0 },
         time: { day: this.currentDay, hour: this.currentHour, speed: this.timeSpeed },
         status: error instanceof Error ? error.message : 'Province map failed to load',
         mapStats: null,
@@ -367,9 +440,11 @@ export class StrategyPrototype {
 
     const spawnAzerbaijan = pickSpawnProvinces(this.provinceState.getByCountry('azerbaijan'), 5)
     const spawnArmenia = pickSpawnProvinces(this.provinceState.getByCountry('armenia'), 5)
+    const templates = [...this.divisionTemplates.values()]
+    const armeniaTemplates = [...templates].reverse()
 
-    spawnAzerbaijan.forEach((province, index) => this.createUnit(`az-${index + 1}`, `AZ Division ${index + 1}`, 'azerbaijan', province))
-    spawnArmenia.forEach((province, index) => this.createUnit(`am-${index + 1}`, `AM Division ${index + 1}`, 'armenia', province))
+    spawnAzerbaijan.forEach((province, index) => this.createUnit(`az-${index + 1}`, `AZ Division ${index + 1}`, 'azerbaijan', province, templates[index % templates.length]))
+    spawnArmenia.forEach((province, index) => this.createUnit(`am-${index + 1}`, `AM Division ${index + 1}`, 'armenia', province, armeniaTemplates[index % armeniaTemplates.length]))
   }
 
   private initializeDivisionTemplates(): void {
@@ -383,21 +458,25 @@ export class StrategyPrototype {
       return
     }
 
-    const bestProvince = [...this.provinceState.getByCountry(PLAYER_COUNTRY_ID)]
-      .sort((left, right) => right.resourceYields.industry - left.resourceYields.industry || right.resourceYields.manpower - left.resourceYields.manpower)[0]
+    for (const countryId of ['azerbaijan', 'armenia'] as CountryId[]) {
+      const bestProvince = [...this.provinceState.getByCountry(countryId)]
+        .sort((left, right) => right.resourceYields.industry - left.resourceYields.industry || right.resourceYields.manpower - left.resourceYields.manpower)[0]
 
-    if (!bestProvince) {
-      return
+      if (!bestProvince) {
+        continue
+      }
+
+      bestProvince.buildings.barracks = 1
+      bestProvince.buildings.militaryComplex = 1
     }
-
-    bestProvince.buildings.barracks = 1
-    bestProvince.buildings.militaryComplex = 1
   }
 
-  private createUnit(id: string, name: string, countryId: CountryId, province: Province): void {
+  private createUnit(id: string, name: string, countryId: CountryId, province: Province, template: DivisionTemplate): void {
+    const combatFields = buildUnitCombatFields(id, template.id, template.name, template.nodes, template.stats)
     const unit: UnitState = {
       id,
       name,
+      ...combatFields,
       countryId,
       owner: COUNTRY_NAMES[countryId],
       provinceId: province.id,
@@ -405,18 +484,16 @@ export class StrategyPrototype {
       route: [],
       routeProvinceIds: [],
       routeIndex: 0,
-      speed: 22,
-      manpower: 1000,
-      maxManpower: 1000,
-      organization: 100,
-      maxOrganization: 100,
-      equipment: 100,
-      maxEquipment: 100,
-      attack: 12,
-      defense: 10,
-      reliability: 0.85,
-      terrainProfile: NEUTRAL_TERRAIN_PROFILE,
       experience: 0,
+      fortifiedProvinceId: province.id,
+      fortificationDays: FORTIFICATION_DAYS_TO_MAX,
+      supplyHours: MAX_SUPPLY_HOURS,
+      maxSupplyHours: MAX_SUPPLY_HOURS,
+      hoursOutOfSupply: 0,
+      encircledHours: 0,
+      isEncircled: false,
+      lastSupplySourceProvinceId: province.id,
+      recentCombatEvents: [],
       status: 'idle',
       reinforcementDelayHours: 0,
     }
@@ -518,13 +595,18 @@ export class StrategyPrototype {
 
     const resourceCost = { ...template.stats.resourceCost, manpower: template.stats.manpower }
 
-    if (!this.economySystem.canAfford(PLAYER_COUNTRY_ID, resourceCost) || economy.equipmentPool < template.stats.equipment) {
+    if (
+      !this.economySystem.canAfford(PLAYER_COUNTRY_ID, resourceCost) ||
+      !this.economySystem.canAffordEquipment(PLAYER_COUNTRY_ID, template.stats.equipmentRequirements) ||
+      economy.equipmentPool < template.stats.equipment * 0.25
+    ) {
       this.updateHud('Not enough manpower, equipment, or resources')
       return
     }
 
     this.economySystem.spendResources(PLAYER_COUNTRY_ID, resourceCost)
-    economy.equipmentPool -= template.stats.equipment
+    this.economySystem.spendEquipmentStockpiles(PLAYER_COUNTRY_ID, template.stats.equipmentRequirements)
+    economy.equipmentPool -= template.stats.equipment * 0.25
     economy.trainingQueue.push({
       id: `train-${this.nextTrainingJobId++}`,
       countryId: PLAYER_COUNTRY_ID,
@@ -532,6 +614,7 @@ export class StrategyPrototype {
       provinceName: province.displayName,
       templateId,
       templateName: template.name,
+      nodes: template.nodes.map((node) => ({ ...node })),
       stats: template.stats,
       totalDays: template.stats.trainingDays,
       daysRemaining: template.stats.trainingDays,
@@ -550,8 +633,14 @@ export class StrategyPrototype {
 
     economy.trainingQueue = economy.trainingQueue.filter((candidate) => candidate.id !== jobId)
     this.economySystem.refundResources(PLAYER_COUNTRY_ID, { ...job.stats.resourceCost, manpower: job.stats.manpower }, TRAINING_REFUND_MULTIPLIER)
-    economy.equipmentPool += job.stats.equipment * TRAINING_REFUND_MULTIPLIER
+    this.economySystem.refundEquipmentStockpiles(PLAYER_COUNTRY_ID, job.stats.equipmentRequirements, TRAINING_REFUND_MULTIPLIER)
+    economy.equipmentPool += job.stats.equipment * 0.25 * TRAINING_REFUND_MULTIPLIER
     this.updateHud('Training cancelled')
+  }
+
+  setProductionLine(lineId: string, category: EquipmentCategory): void {
+    this.economySystem.setProductionLine(PLAYER_COUNTRY_ID, lineId, category)
+    this.updateHud('Production line updated')
   }
 
   saveDivisionTemplate(draft: { id?: string; name: string; nodes: DivisionNode[] }): void {
@@ -626,7 +715,14 @@ export class StrategyPrototype {
   }
 
   private readonly handlePointerDown = (event: PointerEvent): void => {
+    if (event.button === 2) {
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
+
     if (event.button === 1) {
+      event.preventDefault()
       this.isMiddleDragging = true
       this.lastPointer = { x: event.clientX, y: event.clientY }
       this.container.setPointerCapture(event.pointerId)
@@ -676,7 +772,15 @@ export class StrategyPrototype {
   }
 
   private readonly handlePointerUp = (event: PointerEvent): void => {
+    if (event.button === 2) {
+      event.preventDefault()
+      event.stopPropagation()
+      this.handleRightClick(event)
+      return
+    }
+
     if (event.button === 1) {
+      event.preventDefault()
       this.isMiddleDragging = false
       this.container.releasePointerCapture(event.pointerId)
       return
@@ -698,9 +802,6 @@ export class StrategyPrototype {
       this.handleLeftClick(event)
     }
 
-    if (event.button === 2) {
-      this.handleRightClick(event)
-    }
   }
 
   private readonly handlePointerLeave = (): void => {
@@ -722,6 +823,7 @@ export class StrategyPrototype {
 
   private readonly handleContextMenu = (event: MouseEvent): void => {
     event.preventDefault()
+    event.stopPropagation()
   }
 
   private handleLeftClick(event: PointerEvent): void {
@@ -755,6 +857,9 @@ export class StrategyPrototype {
   }
 
   private handleRightClick(event: PointerEvent): void {
+    event.preventDefault()
+    event.stopPropagation()
+
     if (!this.provinceState || !this.pathfinding || this.selectedUnitIds.size === 0) {
       return
     }
@@ -786,6 +891,8 @@ export class StrategyPrototype {
       unit.route = path.map((provinceId) => this.provinceState!.getProvince(provinceId).centerWorld.clone().setY(UNIT_Y))
       unit.routeIndex = 0
       unit.status = 'moving'
+      unit.fortificationDays = 0
+      unit.fortifiedProvinceId = null
       issuedOrders += 1
     }
 
@@ -961,6 +1068,8 @@ export class StrategyPrototype {
 
     this.updateCamera(delta)
     this.updateUnits(delta)
+    this.updateSupplyVehicles(delta)
+    this.updateBattleEffects(delta)
     this.updateSelectionVisuals()
     this.updateSimulation(delta)
 
@@ -1000,6 +1109,10 @@ export class StrategyPrototype {
       this.simHourAccumulator -= 1
       this.currentHour += 1
       hoursProcessed += 1
+      this.updateFortifications()
+      this.updateSupplyState()
+      this.dispatchSupplyVehicles()
+      this.spawnCombatEffects()
 
       const resolutions = this.combatSystem.tickHourly(this.provinceState.provinces, this.units, this.economySystem)
 
@@ -1019,6 +1132,314 @@ export class StrategyPrototype {
 
     if (hoursProcessed > 0) {
       this.syncUnitVisuals()
+    }
+  }
+
+  private updateFortifications(): void {
+    if (!this.provinceState) {
+      return
+    }
+
+    for (const unit of this.units) {
+      if (unit.manpower <= 0 || unit.status === 'moving' || unit.status === 'inCombat' || unit.status === 'retreating' || unit.route.length > 0) {
+        continue
+      }
+
+      if (unit.fortifiedProvinceId !== unit.provinceId) {
+        unit.fortifiedProvinceId = unit.provinceId
+        unit.fortificationDays = 0
+      }
+
+      const province = this.provinceState.getProvince(unit.provinceId)
+
+      if (province.isContested) {
+        continue
+      }
+
+      unit.fortificationDays = Math.min(FORTIFICATION_DAYS_TO_MAX, unit.fortificationDays + 1 / 24)
+    }
+  }
+
+  private updateSupplyState(): void {
+    if (!this.provinceState || !this.pathfinding) {
+      return
+    }
+
+    for (const unit of this.units) {
+      if (unit.manpower <= 0) {
+        continue
+      }
+
+      const demand = Math.max(0.35, (unit.supplyUse + unit.fuelUse) / 3)
+      unit.supplyHours = Math.max(0, unit.supplyHours - demand)
+
+      const route = this.findSupplyRoute(unit)
+      unit.isEncircled = route === null
+
+      if (unit.isEncircled) {
+        unit.encircledHours += 1
+      } else {
+        unit.encircledHours = Math.max(0, unit.encircledHours - 2)
+      }
+
+      if (unit.supplyHours <= 0) {
+        unit.hoursOutOfSupply += 1
+      } else {
+        unit.hoursOutOfSupply = Math.max(0, unit.hoursOutOfSupply - 1)
+      }
+
+      if (unit.isEncircled && unit.encircledHours === 1) {
+        unit.recentCombatEvents = ['Supply trucks cannot reach this division', ...unit.recentCombatEvents].slice(0, 8)
+      }
+    }
+  }
+
+  private dispatchSupplyVehicles(): void {
+    if (!this.provinceState || !this.pathfinding) {
+      return
+    }
+
+    this.absorbSupplyTruckStockpiles()
+
+    const needyUnits = this.units
+      .filter((unit) => unit.manpower > 0 && unit.supplyHours < SUPPLY_DISPATCH_THRESHOLD && !this.supplyVehicles.some((vehicle) => vehicle.targetUnitId === unit.id && vehicle.status === 'toUnit'))
+      .sort((left, right) => left.supplyHours - right.supplyHours)
+
+    for (const unit of needyUnits) {
+      const vehicle = this.supplyVehicles.find((candidate) => candidate.countryId === unit.countryId && candidate.status === 'available')
+
+      if (!vehicle) {
+        break
+      }
+
+      const route = this.findSupplyRoute(unit)
+
+      if (!route || route.length === 0) {
+        continue
+      }
+
+      vehicle.targetUnitId = unit.id
+      vehicle.routeProvinceIds = route
+      vehicle.route = route.map((provinceId) => this.provinceState!.getProvince(provinceId).centerWorld.clone().setY(1.55))
+      vehicle.routeIndex = 0
+      vehicle.sourceProvinceId = route[0]
+      vehicle.status = 'toUnit'
+      vehicle.cargoHours = SUPPLY_DELIVERY_HOURS
+      this.supplyVehicleGroups.get(vehicle.id)?.position.copy(vehicle.position)
+    }
+  }
+
+  private updateSupplyVehicles(delta: number): void {
+    if (!this.provinceState || this.timeSpeed === 0) {
+      return
+    }
+
+    const scaledDelta = delta * this.timeSpeed
+
+    for (const vehicle of this.supplyVehicles) {
+      if (vehicle.status === 'available') {
+        continue
+      }
+
+      const target = vehicle.route[vehicle.routeIndex]
+
+      if (!target) {
+        this.finishSupplyVehicleRoute(vehicle)
+        continue
+      }
+
+      const direction = target.clone().sub(vehicle.position)
+      const distance = direction.length()
+      const travel = SUPPLY_VEHICLE_SPEED * MOVEMENT_SPEED_MULTIPLIER * scaledDelta
+
+      if (distance <= travel) {
+        vehicle.position.copy(target)
+        vehicle.routeIndex += 1
+      } else {
+        vehicle.position.add(direction.normalize().multiplyScalar(travel))
+      }
+
+      this.supplyVehicleGroups.get(vehicle.id)?.position.copy(vehicle.position)
+    }
+  }
+
+  private finishSupplyVehicleRoute(vehicle: SupplyVehicleState): void {
+    if (vehicle.status === 'toUnit') {
+      const unit = this.units.find((candidate) => candidate.id === vehicle.targetUnitId)
+
+      if (unit && unit.manpower > 0) {
+        unit.supplyHours = Math.min(unit.maxSupplyHours, unit.supplyHours + vehicle.cargoHours)
+        unit.hoursOutOfSupply = 0
+        unit.lastSupplySourceProvinceId = vehicle.sourceProvinceId
+        unit.recentCombatEvents = ['Supply convoy delivered ammunition, fuel, and rations', ...unit.recentCombatEvents].slice(0, 8)
+      }
+
+      vehicle.route = [...vehicle.route].reverse()
+      vehicle.routeProvinceIds = [...vehicle.routeProvinceIds].reverse()
+      vehicle.routeIndex = 0
+      vehicle.status = 'returning'
+      return
+    }
+
+    vehicle.targetUnitId = null
+    vehicle.route = []
+    vehicle.routeProvinceIds = []
+    vehicle.routeIndex = 0
+    vehicle.status = 'available'
+  }
+
+  private findSupplyRoute(unit: UnitState): number[] | null {
+    if (!this.provinceState || !this.pathfinding) {
+      return null
+    }
+
+    const sources = this.getSupplySourceProvinces(unit.countryId)
+    const unitProvince = this.provinceState.getProvince(unit.provinceId)
+    const targets = unitProvince.controllerCountryId === unit.countryId && !unitProvince.isContested
+      ? [unitProvince.id]
+      : unitProvince.neighbors.filter((provinceId) => {
+          const province = this.provinceState!.getProvince(provinceId)
+          return province.controllerCountryId === unit.countryId && !province.isContested
+        })
+
+    let bestRoute: number[] | null = null
+
+    for (const source of sources) {
+      for (const targetProvinceId of targets) {
+        const route = this.pathfinding.findPathWhere(source.id, targetProvinceId, (province) => province.controllerCountryId === unit.countryId && !province.isContested)
+
+        if (route.length > 0 && (!bestRoute || route.length < bestRoute.length)) {
+          bestRoute = route
+        }
+      }
+    }
+
+    return bestRoute
+  }
+
+  private getSupplySourceProvinces(countryId: CountryId): Province[] {
+    if (!this.provinceState) {
+      return []
+    }
+
+    return this.provinceState.provinces.filter((province) => (
+      province.controllerCountryId === countryId &&
+      !province.isContested &&
+      (province.buildings.barracks > 0 || province.buildings.militaryComplex > 0)
+    ))
+  }
+
+  private absorbSupplyTruckStockpiles(): void {
+    if (!this.provinceState) {
+      return
+    }
+
+    for (const countryId of ['azerbaijan', 'armenia'] as CountryId[]) {
+      const economy = this.economySystem.countries[countryId]
+      const sources = this.getSupplySourceProvinces(countryId)
+      const source = sources[0]
+
+      while (source && economy.equipmentStockpiles.supplyTrucks >= 1) {
+        economy.equipmentStockpiles.supplyTrucks -= 1
+        this.createSupplyVehicle(countryId, source)
+      }
+    }
+  }
+
+  private createSupplyVehicle(countryId: CountryId, source: Province): void {
+    const id = `supply-${this.nextSupplyVehicleSerial++}`
+    const position = source.centerWorld.clone().setY(1.55)
+    const vehicle: SupplyVehicleState = {
+      id,
+      countryId,
+      sourceProvinceId: source.id,
+      targetUnitId: null,
+      position,
+      routeProvinceIds: [],
+      route: [],
+      routeIndex: 0,
+      status: 'available',
+      cargoHours: SUPPLY_DELIVERY_HOURS,
+    }
+    const geometry = new THREE.BoxGeometry(1.1, 0.7, 1.4)
+    const material = new THREE.MeshStandardMaterial({
+      color: COUNTRY_COLORS[countryId],
+      roughness: 0.65,
+      metalness: 0.12,
+    })
+    const mesh = new THREE.Mesh(geometry, material)
+    mesh.position.copy(position)
+    mesh.castShadow = true
+    this.supplyVehicles.push(vehicle)
+    this.supplyVehicleGroups.set(id, mesh)
+    this.scene.add(mesh)
+  }
+
+  private spawnCombatEffects(): void {
+    if (!this.provinceState) {
+      return
+    }
+
+    for (const combat of this.combatSystem.combats.values()) {
+      if (combat.elapsedHours % 2 !== 0) {
+        continue
+      }
+
+      const province = this.provinceState.getProvince(combat.provinceId)
+      const projection = combat.lastProjection
+      const intensity = projection ? Math.min(3, Math.max(1, (projection.attacker.softAttack + projection.defender.softAttack + projection.attacker.hardAttack + projection.defender.hardAttack) / 45)) : 1
+      this.spawnBattleEffect(province.centerWorld, intensity)
+    }
+  }
+
+  private spawnBattleEffect(center: THREE.Vector3, intensity: number): void {
+    const group = new THREE.Group()
+    const offset = new THREE.Vector3((Math.random() - 0.5) * 8, 3 + Math.random() * 2, (Math.random() - 0.5) * 8)
+    group.position.copy(center.clone().add(offset))
+
+    const flash = new THREE.Mesh(
+      new THREE.SphereGeometry(0.9 + intensity * 0.35, 10, 10),
+      new THREE.MeshBasicMaterial({ color: 0xffa53a, transparent: true, opacity: 0.9 }),
+    )
+    const smoke = new THREE.Mesh(
+      new THREE.SphereGeometry(1.4 + intensity * 0.45, 10, 10),
+      new THREE.MeshBasicMaterial({ color: 0x1f2933, transparent: true, opacity: 0.28 }),
+    )
+    smoke.position.y += 0.8
+    group.add(flash, smoke)
+    this.scene.add(group)
+    this.battleEffects.push({
+      id: `effect-${this.nextBattleEffectSerial++}`,
+      group,
+      age: 0,
+      duration: 1.1 + intensity * 0.2,
+    })
+  }
+
+  private updateBattleEffects(delta: number): void {
+    for (const effect of [...this.battleEffects]) {
+      effect.age += delta
+      const progress = Math.min(1, effect.age / effect.duration)
+      effect.group.scale.setScalar(1 + progress * 1.8)
+
+      effect.group.traverse((object) => {
+        if (object instanceof THREE.Mesh && object.material instanceof THREE.MeshBasicMaterial) {
+          object.material.opacity = Math.max(0, object.material.opacity * (1 - progress * 0.12))
+        }
+      })
+
+      if (progress >= 1) {
+        this.scene.remove(effect.group)
+        effect.group.traverse((object) => {
+          if (object instanceof THREE.Mesh) {
+            object.geometry.dispose()
+            if (object.material instanceof THREE.Material) {
+              object.material.dispose()
+            }
+          }
+        })
+        this.battleEffects.splice(this.battleEffects.indexOf(effect), 1)
+      }
     }
   }
 
@@ -1087,7 +1508,8 @@ export class StrategyPrototype {
       const targetProvinceId = unit.routeProvinceIds[unit.routeIndex]
       const targetTerrain = targetProvinceId === undefined ? null : this.provinceState.getProvince(targetProvinceId).terrainType
       const terrainSpeedModifier = targetTerrain ? unit.terrainProfile[targetTerrain]?.speed ?? 1 : 1
-      const travel = unit.speed * terrainSpeedModifier * scaledDelta
+      const supplySpeedModifier = unit.hoursOutOfSupply >= 24 ? 0.55 : unit.hoursOutOfSupply >= 12 ? 0.75 : 1
+      const travel = unit.speed * terrainSpeedModifier * supplySpeedModifier * MOVEMENT_SPEED_MULTIPLIER * scaledDelta
 
       if (distance <= travel) {
         unit.position.copy(target)
@@ -1121,6 +1543,8 @@ export class StrategyPrototype {
     const province = this.provinceState.getProvince(provinceId)
     province.units.push(unit.id)
     unit.provinceId = provinceId
+    unit.fortificationDays = 0
+    unit.fortifiedProvinceId = provinceId
 
     const enemyUnit = province.units
       .map((unitId) => this.units.find((entry) => entry.id === unitId))
@@ -1144,7 +1568,10 @@ export class StrategyPrototype {
 
     const economy = this.economySystem.countries[PLAYER_COUNTRY_ID]
     const buildings = this.getPlayerBuildingCounts()
+    this.economySystem.ensureProductionSlots(PLAYER_COUNTRY_ID, buildings.militaryComplex)
+    this.economySystem.ensureProductionSlots('armenia', this.getBuildingCountsForCountry('armenia').militaryComplex)
     this.economySystem.addEquipment(PLAYER_COUNTRY_ID, buildings.militaryComplex * MILITARY_COMPLEX_DAILY_EQUIPMENT)
+    this.absorbSupplyTruckStockpiles()
 
     for (const job of [...economy.constructionQueue]) {
       job.daysRemaining = Math.max(0, job.daysRemaining - 1)
@@ -1186,9 +1613,11 @@ export class StrategyPrototype {
 
   private deployTrainingJob(job: TrainingJob, province: Province): void {
     const id = `az-trained-${this.nextUnitSerial++}`
+    const combatFields = buildUnitCombatFields(id, job.templateId, job.templateName, job.nodes, job.stats)
     const unit: UnitState = {
       id,
       name: job.templateName,
+      ...combatFields,
       countryId: PLAYER_COUNTRY_ID,
       owner: COUNTRY_NAMES[PLAYER_COUNTRY_ID],
       provinceId: province.id,
@@ -1196,18 +1625,16 @@ export class StrategyPrototype {
       route: [],
       routeProvinceIds: [],
       routeIndex: 0,
-      speed: job.stats.speed,
-      manpower: job.stats.manpower,
-      maxManpower: job.stats.manpower,
-      organization: job.stats.organization,
-      maxOrganization: job.stats.organization,
-      equipment: job.stats.equipment,
-      maxEquipment: job.stats.equipment,
-      attack: Math.round(job.stats.attack),
-      defense: Math.round(job.stats.defense),
-      reliability: job.stats.reliability,
-      terrainProfile: job.stats.terrainProfile,
       experience: 0,
+      fortifiedProvinceId: province.id,
+      fortificationDays: 0,
+      supplyHours: MAX_SUPPLY_HOURS,
+      maxSupplyHours: MAX_SUPPLY_HOURS,
+      hoursOutOfSupply: 0,
+      encircledHours: 0,
+      isEncircled: false,
+      lastSupplySourceProvinceId: province.id,
+      recentCombatEvents: [],
       status: 'idle',
       reinforcementDelayHours: 0,
     }
@@ -1228,12 +1655,16 @@ export class StrategyPrototype {
   }
 
   private getPlayerBuildingCounts(): { barracks: number; militaryComplex: number } {
+    return this.getBuildingCountsForCountry(PLAYER_COUNTRY_ID)
+  }
+
+  private getBuildingCountsForCountry(countryId: CountryId): { barracks: number; militaryComplex: number } {
     if (!this.provinceState) {
       return { barracks: 0, militaryComplex: 0 }
     }
 
     return this.provinceState.provinces
-      .filter((province) => this.isPlayerControlledProvince(province))
+      .filter((province) => province.controllerCountryId === countryId)
       .reduce(
         (counts, province) => ({
           barracks: counts.barracks + province.buildings.barracks,
@@ -1340,6 +1771,7 @@ export class StrategyPrototype {
         : null
 
     const activeCombats = this.buildActiveCombatOverlays()
+    const battleForecast = this.buildBattleForecast(activeCombat, selectedProvince)
 
     this.setHudState({
       isLoading: false,
@@ -1370,9 +1802,36 @@ export class StrategyPrototype {
             maxOrganization: selectedUnit.maxOrganization,
             equipment: selectedUnit.equipment,
             maxEquipment: selectedUnit.maxEquipment,
+            softAttack: selectedUnit.softAttack,
+            hardAttack: selectedUnit.hardAttack,
             attack: selectedUnit.attack,
             defense: selectedUnit.defense,
+            breakthrough: selectedUnit.breakthrough,
+            armor: selectedUnit.armor,
+            piercing: selectedUnit.piercing,
+            hardness: selectedUnit.hardness,
+            maneuverability: selectedUnit.maneuverability,
+            supplyUse: selectedUnit.supplyUse,
+            fuelUse: selectedUnit.fuelUse,
             reliability: selectedUnit.reliability,
+            fortificationDays: selectedUnit.fortificationDays,
+            fortificationLevel: selectedUnit.fortifiedProvinceId === selectedUnit.provinceId ? Math.min(1, selectedUnit.fortificationDays / FORTIFICATION_DAYS_TO_MAX) : 0,
+            supplyHours: selectedUnit.supplyHours,
+            maxSupplyHours: selectedUnit.maxSupplyHours,
+            hoursOutOfSupply: selectedUnit.hoursOutOfSupply,
+            encircledHours: selectedUnit.encircledHours,
+            isEncircled: selectedUnit.isEncircled,
+            battalions: selectedUnit.battalions.map((battalion) => ({
+              name: battalion.name,
+              status: battalion.status,
+              manpower: battalion.manpower,
+              maxManpower: battalion.maxManpower,
+              equipment: battalion.equipment,
+              maxEquipment: battalion.maxEquipment,
+              organization: battalion.organization,
+              maxOrganization: battalion.maxOrganization,
+            })),
+            recentCombatEvents: selectedUnit.recentCombatEvents,
             reinforcementDelayHours: selectedUnit.reinforcementDelayHours,
           }
         : null,
@@ -1389,8 +1848,13 @@ export class StrategyPrototype {
         trainingSlots: playerBuildings.barracks,
         activeTrainingCount: playerEconomy.trainingQueue.filter((job) => job.status === 'training').length,
       },
+      logistics: {
+        supplyVehicleCount: this.supplyVehicles.length,
+        activeSupplyVehicleCount: this.supplyVehicles.filter((vehicle) => vehicle.status !== 'available').length,
+      },
       activeCombat,
       activeCombats,
+      battleForecast,
       time: {
         day: this.currentDay,
         hour: this.currentHour,
@@ -1430,9 +1894,12 @@ export class StrategyPrototype {
 
       const attackerEffectiveness = (attackerManpower / Math.max(1, attackerMaxManpower)) * (attackerAvgOrg / Math.max(1, attackerMaxOrg))
       const defenderEffectiveness = (defenderManpower / Math.max(1, defenderMaxManpower)) * (defenderAvgOrg / Math.max(1, defenderMaxOrg))
+      const projection = combat.lastProjection ?? (attackerSide.length > 0 && defenderSide.length > 0 ? this.combatSystem.getForecast(attackerSide, defenderSide, province) : null)
 
       let advantage: 'attacker' | 'defender' | 'even' = 'even'
-      if (attackerEffectiveness > defenderEffectiveness * 1.15) advantage = 'attacker'
+      if (projection) {
+        advantage = projection.winner === 'attacker' ? 'attacker' : projection.winner === 'defender' ? 'defender' : 'even'
+      } else if (attackerEffectiveness > defenderEffectiveness * 1.15) advantage = 'attacker'
       else if (defenderEffectiveness > attackerEffectiveness * 1.15) advantage = 'defender'
 
       const worldPos = new THREE.Vector3(province.centerWorld.x, province.centerWorld.y + 12, province.centerWorld.z)
@@ -1464,10 +1931,59 @@ export class StrategyPrototype {
           unitCount: defenderSide.length,
         },
         advantage,
+        confidence: projection?.confidence ?? 50,
+        terrain: province.terrainType,
       })
     }
 
     return overlays
+  }
+
+  private buildBattleForecast(activeCombat: CombatInstance | null, selectedProvince: Province | null): BattleProjection | null {
+    if (!this.provinceState) {
+      return null
+    }
+
+    if (activeCombat) {
+      const province = this.provinceState.getProvince(activeCombat.provinceId)
+      const sides = this.combatSystem.getSidesForOverlay(activeCombat, this.units)
+
+      if (sides.attacker.length === 0 || sides.defender.length === 0) {
+        return null
+      }
+
+      return activeCombat.lastProjection ?? this.combatSystem.getForecast(sides.attacker, sides.defender, province)
+    }
+
+    if (!selectedProvince || this.selectedUnitIds.size === 0) {
+      return null
+    }
+
+    const attackers = this.getSelectedUnits().filter((unit) => unit.manpower > 0 && unit.countryId === PLAYER_COUNTRY_ID)
+
+    if (attackers.length === 0) {
+      return null
+    }
+
+    const defenderCountryId = selectedProvince.units
+      .map((unitId) => this.units.find((unit) => unit.id === unitId))
+      .filter((unit): unit is UnitState => Boolean(unit))
+      .find((unit) => unit.countryId !== attackers[0].countryId && unit.manpower > 0)?.countryId ?? selectedProvince.controllerCountryId
+
+    if (!areAtWar(attackers[0].countryId, defenderCountryId)) {
+      return null
+    }
+
+    const defenders = selectedProvince.units
+      .map((unitId) => this.units.find((unit) => unit.id === unitId))
+      .filter((unit): unit is UnitState => Boolean(unit))
+      .filter((unit) => unit.countryId === defenderCountryId && unit.manpower > 0)
+
+    if (defenders.length === 0) {
+      return null
+    }
+
+    return this.combatSystem.getForecast(attackers, defenders, selectedProvince)
   }
 
   private setSelectedProvince(provinceId: number | null): void {

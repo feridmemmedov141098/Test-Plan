@@ -1,4 +1,5 @@
 import type { CountryId, ResourceYields, TerrainType } from '../province/provinceTypes'
+import { createEmptyEquipmentStockpiles, type EquipmentStockpiles } from '../equipment/EquipmentTypes'
 
 export type BattalionType = 'infantry' | 'motorized' | 'mechanized' | 'tank' | 'antiTank' | 'artillery'
 export type TerrainModifierSet = Record<TerrainType, { attack: number; defense: number; speed: number }>
@@ -9,6 +10,7 @@ export interface BattalionDefinition {
   role: string
   manpower: number
   equipment: number
+  equipmentRequirements: EquipmentStockpiles
   resourceCost: ResourceYields
   trainingDays: number
   softAttack: number
@@ -20,6 +22,7 @@ export interface BattalionDefinition {
   reliability: number
   armor: number
   piercing: number
+  hardness: number
   maneuverability: number
   supplyUse: number
   fuelUse: number
@@ -36,6 +39,7 @@ export interface DivisionNode {
 export interface DivisionStats {
   manpower: number
   equipment: number
+  equipmentRequirements: EquipmentStockpiles
   resourceCost: ResourceYields
   trainingDays: number
   softAttack: number
@@ -48,6 +52,7 @@ export interface DivisionStats {
   reliability: number
   armor: number
   piercing: number
+  hardness: number
   maneuverability: number
   supplyUse: number
   fuelUse: number
@@ -70,6 +75,7 @@ export interface TrainingJob {
   provinceName: string
   templateId: string
   templateName: string
+  nodes: DivisionNode[]
   stats: DivisionStats
   totalDays: number
   daysRemaining: number
@@ -88,6 +94,7 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
     role: 'Cheap line defense',
     manpower: 450,
     equipment: 35,
+    equipmentRequirements: { ...createEmptyEquipmentStockpiles(), smallArms: 35 },
     resourceCost: { oil: 0, gas: 0, metal: 8, food: 10, industry: 10, energy: 0, manpower: 0 },
     trainingDays: 4,
     softAttack: 6,
@@ -99,6 +106,7 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
     reliability: 0.92,
     armor: 0,
     piercing: 4,
+    hardness: 0.05,
     maneuverability: 42,
     supplyUse: 1,
     fuelUse: 0,
@@ -116,6 +124,7 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
     role: 'Fast exploitation infantry',
     manpower: 430,
     equipment: 55,
+    equipmentRequirements: { ...createEmptyEquipmentStockpiles(), smallArms: 40, supportVehicles: 15 },
     resourceCost: { oil: 14, gas: 0, metal: 16, food: 8, industry: 18, energy: 4, manpower: 0 },
     trainingDays: 5,
     softAttack: 7,
@@ -127,6 +136,7 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
     reliability: 0.86,
     armor: 1,
     piercing: 5,
+    hardness: 0.22,
     maneuverability: 65,
     supplyUse: 1.4,
     fuelUse: 1.2,
@@ -145,6 +155,7 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
     role: 'Protected mobile infantry',
     manpower: 420,
     equipment: 75,
+    equipmentRequirements: { ...createEmptyEquipmentStockpiles(), smallArms: 40, apcIfv: 35 },
     resourceCost: { oil: 18, gas: 0, metal: 28, food: 8, industry: 26, energy: 6, manpower: 0 },
     trainingDays: 6,
     softAttack: 8,
@@ -156,6 +167,7 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
     reliability: 0.82,
     armor: 8,
     piercing: 10,
+    hardness: 0.48,
     maneuverability: 56,
     supplyUse: 1.8,
     fuelUse: 1.7,
@@ -174,6 +186,7 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
     role: 'Armored breakthrough',
     manpower: 300,
     equipment: 100,
+    equipmentRequirements: { ...createEmptyEquipmentStockpiles(), tanks: 40, supportVehicles: 20 },
     resourceCost: { oil: 28, gas: 0, metal: 46, food: 4, industry: 38, energy: 10, manpower: 0 },
     trainingDays: 8,
     softAttack: 10,
@@ -185,6 +198,7 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
     reliability: 0.76,
     armor: 32,
     piercing: 18,
+    hardness: 0.85,
     maneuverability: 48,
     supplyUse: 2.4,
     fuelUse: 2.6,
@@ -204,6 +218,7 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
     role: 'Armor piercing support',
     manpower: 260,
     equipment: 45,
+    equipmentRequirements: { ...createEmptyEquipmentStockpiles(), smallArms: 25, antiTankWeapons: 20 },
     resourceCost: { oil: 0, gas: 0, metal: 26, food: 5, industry: 20, energy: 4, manpower: 0 },
     trainingDays: 5,
     softAttack: 3,
@@ -215,6 +230,7 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
     reliability: 0.88,
     armor: 0,
     piercing: 34,
+    hardness: 0.12,
     maneuverability: 36,
     supplyUse: 1.2,
     fuelUse: 0,
@@ -232,6 +248,7 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
     role: 'Soft attack fire support',
     manpower: 220,
     equipment: 65,
+    equipmentRequirements: { ...createEmptyEquipmentStockpiles(), artillery: 24, supportVehicles: 10 },
     resourceCost: { oil: 0, gas: 0, metal: 34, food: 4, industry: 28, energy: 6, manpower: 0 },
     trainingDays: 6,
     softAttack: 18,
@@ -243,6 +260,7 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
     reliability: 0.84,
     armor: 0,
     piercing: 6,
+    hardness: 0.04,
     maneuverability: 28,
     supplyUse: 1.8,
     fuelUse: 0,
@@ -264,11 +282,13 @@ export function createEmptyDivisionResourceCost(): ResourceYields {
 export function calculateDivisionStats(nodes: DivisionNode[]): DivisionStats {
   const battalions = nodes.map((node) => BATTALION_DEFINITIONS[node.battalionType])
   const resourceCost = createEmptyDivisionResourceCost()
+  const equipmentRequirements = createEmptyEquipmentStockpiles()
 
   if (battalions.length === 0) {
     return {
       manpower: 0,
       equipment: 0,
+      equipmentRequirements,
       resourceCost,
       trainingDays: 0,
       softAttack: 0,
@@ -281,6 +301,7 @@ export function calculateDivisionStats(nodes: DivisionNode[]): DivisionStats {
       reliability: 0,
       armor: 0,
       piercing: 0,
+      hardness: 0,
       maneuverability: 0,
       supplyUse: 0,
       fuelUse: 0,
@@ -292,6 +313,10 @@ export function calculateDivisionStats(nodes: DivisionNode[]): DivisionStats {
     for (const resourceId of Object.keys(resourceCost) as Array<keyof ResourceYields>) {
       resourceCost[resourceId] += battalion.resourceCost[resourceId]
     }
+
+    for (const category of Object.keys(equipmentRequirements) as Array<keyof EquipmentStockpiles>) {
+      equipmentRequirements[category] += battalion.equipmentRequirements[category]
+    }
   }
 
   const equipment = battalions.reduce((sum, battalion) => sum + battalion.equipment, 0)
@@ -301,10 +326,12 @@ export function calculateDivisionStats(nodes: DivisionNode[]): DivisionStats {
   const supplyUse = sumBattalionStat(battalions, 'supplyUse')
   const fuelUse = sumBattalionStat(battalions, 'fuelUse')
   const avgManeuver = avgBattalionStat(battalions, 'maneuverability')
+  const hardnessWeight = battalions.reduce((sum, battalion) => sum + battalion.equipment + battalion.manpower * 0.08, 0)
 
   return {
     manpower: sumBattalionStat(battalions, 'manpower'),
     equipment,
+    equipmentRequirements,
     resourceCost,
     trainingDays: Math.max(...battalions.map((battalion) => battalion.trainingDays)) + battalions.length,
     softAttack: sumBattalionStat(battalions, 'softAttack'),
@@ -317,6 +344,7 @@ export function calculateDivisionStats(nodes: DivisionNode[]): DivisionStats {
     reliability: weightedReliability,
     armor: Math.max(...armorValues) * 0.4 + average(armorValues) * 0.6,
     piercing: Math.max(...piercingValues) * 0.4 + average(piercingValues) * 0.6,
+    hardness: battalions.reduce((sum, battalion) => sum + battalion.hardness * (battalion.equipment + battalion.manpower * 0.08), 0) / Math.max(1, hardnessWeight),
     maneuverability: Math.max(5, avgManeuver - supplyUse * 1.8 - fuelUse * 1.2),
     supplyUse,
     fuelUse,

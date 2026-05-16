@@ -13,6 +13,10 @@ export class ProvincePathfindingSystem {
   }
 
   findPath(startProvinceId: number, targetProvinceId: number): number[] {
+    return this.findPathWhere(startProvinceId, targetProvinceId, () => true)
+  }
+
+  findPathWhere(startProvinceId: number, targetProvinceId: number, canEnter: (province: Province) => boolean): number[] {
     if (startProvinceId === targetProvinceId) {
       return [startProvinceId]
     }
@@ -42,6 +46,11 @@ export class ProvincePathfindingSystem {
 
       for (const neighborId of currentProvince.neighbors) {
         const neighbor = this.provinces[neighborId]
+
+        if (neighborId !== targetProvinceId && !canEnter(neighbor)) {
+          continue
+        }
+
         const nextCost = costSoFar[current.provinceId] + currentProvince.centerWorld.distanceTo(neighbor.centerWorld)
 
         if (nextCost < costSoFar[neighborId]) {

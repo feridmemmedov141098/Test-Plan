@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Edit3, Factory, Flame, Fuel, Hammer, PencilRuler, Pickaxe, Plus, Save, Swords, Trash2, Users, Wheat, X, Zap } from 'lucide-react'
 import './App.css'
+import { EQUIPMENT_CATEGORIES, EQUIPMENT_LABELS, type EquipmentCategory } from './game/equipment/EquipmentTypes'
 import { BUILDING_DEFINITIONS, type BuildingType } from './game/economy/ConstructionTypes'
 import type { ResourceId, ResourceYields } from './game/province/provinceTypes'
 import {
@@ -45,6 +46,8 @@ const initialHudState: PrototypeHudState = {
   },
   activeCombat: null,
   activeCombats: [],
+  battleForecast: null,
+  logistics: { supplyVehicleCount: 0, activeSupplyVehicleCount: 0 },
   time: { day: 1, hour: 0, speed: 1 },
   status: 'Loading province map',
   mapStats: null,
@@ -53,6 +56,7 @@ const initialHudState: PrototypeHudState = {
 function App() {
   const mountRef = useRef<HTMLDivElement | null>(null)
   const prototypeRef = useRef<StrategyPrototype | null>(null)
+  const showLegacyUnitPanel = false
   const [hudState, setHudState] = useState<PrototypeHudState>(initialHudState)
   const [isDesignerOpen, setIsDesignerOpen] = useState(false)
   const [editingTemplate, setEditingTemplate] = useState<DivisionTemplate | null>(null)
@@ -97,6 +101,10 @@ function App() {
     prototypeRef.current?.saveDivisionTemplate(draft)
   }, [])
 
+  const setProductionLine = useCallback((lineId: string, category: EquipmentCategory) => {
+    prototypeRef.current?.setProductionLine(lineId, category)
+  }, [])
+
   const openNewDesigner = useCallback(() => {
     setEditingTemplate(null)
     setIsDesignerOpen(true)
@@ -108,7 +116,7 @@ function App() {
   }, [])
 
   return (
-    <main className="app-shell">
+    <main className="app-shell" onContextMenu={(event) => event.preventDefault()}>
       <section ref={mountRef} className="map-viewport" aria-label="South Caucasus province strategy map" />
       
       {/* Top Bar */}
@@ -284,9 +292,31 @@ function App() {
               </div>
             )) : <div className="empty-state compact">No construction queued</div>}
           </div>
+          <div className="production-block">
+            <span className="designer-column-title">Production</span>
+            {playerEconomy && playerEconomy.productionLines.length > 0 ? playerEconomy.productionLines.map((line) => (
+              <div key={line.id} className="production-line">
+                <span>{line.id.replace(`${PLAYER_COUNTRY_ID}-`, '').toUpperCase()}</span>
+                <select value={line.category} onChange={(event) => setProductionLine(line.id, event.target.value as EquipmentCategory)}>
+                  {EQUIPMENT_CATEGORIES.map((category) => (
+                    <option key={category} value={category}>{EQUIPMENT_LABELS[category]}</option>
+                  ))}
+                </select>
+              </div>
+            )) : <div className="empty-state compact">Build Military Complexes for production</div>}
+            {playerEconomy && (
+              <div className="equipment-stockpile-grid">
+                {EQUIPMENT_CATEGORIES.map((category) => (
+                  <span key={category} title={EQUIPMENT_LABELS[category]}>
+                    {EQUIPMENT_LABELS[category]} {Math.floor(playerEconomy.equipmentStockpiles[category])}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="panel-section training-panel">
+        {!hudState.selectedUnit ? <div className="panel-section training-panel">
           <div className="section-header">
             <PencilRuler className="section-icon-svg" size={16} />
             <span className="header-title">DIVISIONS</span>
@@ -346,10 +376,10 @@ function App() {
               </div>
             )) : <div className="empty-state compact">No divisions training</div>}
           </div>
-        </div>
+        </div> : <UnitManagementPanel unit={hudState.selectedUnit} logistics={hudState.logistics} />}
 
         {/* Selected Province */}
-        <div className="panel-section">
+        <div className="panel-section province-panel">
           <div className="section-header">
             <span className="header-icon">📍</span>
             <span className="header-title">PROVINCE</span>
@@ -407,9 +437,19 @@ function App() {
           )}
         </div>
 
+        {hudState.battleForecast && (
+          <div className="panel-section battle-intel-panel">
+            <BattleIntelPanel
+              forecast={hudState.battleForecast}
+              combat={hudState.activeCombats.find((combat) => combat.id === hudState.activeCombat?.id) ?? null}
+              activeCombat={hudState.activeCombat}
+            />
+          </div>
+        )}
+
         {/* Selected Unit */}
-        {hudState.selectedUnit && (
-          <div className="panel-section">
+        {showLegacyUnitPanel && hudState.selectedUnit && !hudState.battleForecast && (
+          <div className="panel-section unit-panel">
             <div className="section-header">
               <span className="header-icon">🎖</span>
               <span className="header-title">UNIT</span>
@@ -422,6 +462,18 @@ function App() {
                 </span>
               </div>
               <div className="unit-status">{hudState.selectedUnit.status}</div>
+              <div className="fortification-meter">
+                <div className="stat-bar-header">
+                  <span className="stat-bar-label">Fortification</span>
+                  <span className="stat-bar-value">{Math.round(hudState.selectedUnit.fortificationLevel * 100)}%</span>
+                </div>
+                <div className="stat-bar-track">
+                  <div className="stat-bar-fill fortification" style={{ width: `${hudState.selectedUnit.fortificationLevel * 100}%` }}></div>
+                </div>
+                <span className="fortification-note">
+                  {hudState.selectedUnit.fortificationLevel >= 1 ? 'Prepared positions' : `${Math.max(0, Math.ceil(7 - hudState.selectedUnit.fortificationDays))}d to full`}
+                </span>
+              </div>
               
               <div className="stat-bars">
                 <div className="stat-bar">
@@ -472,6 +524,18 @@ function App() {
                   <span className="combat-stat-value">{hudState.selectedUnit.defense}</span>
                 </div>
                 <div className="combat-stat">
+                  <span className="combat-stat-label">BRK</span>
+                  <span className="combat-stat-value">{hudState.selectedUnit.breakthrough}</span>
+                </div>
+                <div className="combat-stat">
+                  <span className="combat-stat-label">ARM</span>
+                  <span className="combat-stat-value">{Math.round(hudState.selectedUnit.armor)}</span>
+                </div>
+                <div className="combat-stat">
+                  <span className="combat-stat-label">PEN</span>
+                  <span className="combat-stat-value">{Math.round(hudState.selectedUnit.piercing)}</span>
+                </div>
+                <div className="combat-stat">
                   <span className="combat-stat-label">REL</span>
                   <span className="combat-stat-value">{Math.round(hudState.selectedUnit.reliability * 100)}%</span>
                 </div>
@@ -488,7 +552,7 @@ function App() {
         )}
 
         {/* Active Combat */}
-        {hudState.activeCombat && (
+        {hudState.activeCombat && !hudState.battleForecast && (
           <div className="panel-section combat-section">
             <div className="section-header">
               <span className="header-icon">💥</span>
@@ -555,7 +619,7 @@ function App() {
       )}
 
       {/* Battle Popups */}
-      {hudState.activeCombats.map((combat) => (
+      {hudState.activeCombats.filter((combat) => combat.id !== hudState.activeCombat?.id && !hudState.battleForecast).map((combat) => (
         <BattlePopup key={combat.id} combat={combat} />
       ))}
 
@@ -572,6 +636,12 @@ function App() {
 
 interface BattlePopupProps {
   combat: ActiveCombatOverlay
+}
+
+interface BattleForecastPanelProps {
+  forecast: NonNullable<PrototypeHudState['battleForecast']>
+  combat: ActiveCombatOverlay | null
+  activeCombat: PrototypeHudState['activeCombat']
 }
 
 interface ResourceChipProps {
@@ -601,6 +671,172 @@ function ResourceIcon({ resourceId }: { resourceId: ResourceId }) {
     <span className={`resource-icon ${resourceId}`} aria-hidden="true">
       <Icon size={15} strokeWidth={2.4} />
     </span>
+  )
+}
+
+function BattleIntelPanel({ forecast, combat, activeCombat }: BattleForecastPanelProps) {
+  const winnerLabel = forecast.winner === 'attacker' ? 'Attacker advantage' : forecast.winner === 'defender' ? 'Defender holds' : 'Stalemate likely'
+  const winnerClass = forecast.winner === 'attacker' ? 'attacker' : forecast.winner === 'defender' ? 'defender' : 'even'
+  const messageIndex = activeCombat ? Math.floor(activeCombat.elapsedHours / 6) % Math.max(1, forecast.messages.length) : 0
+  const currentMessage = forecast.messages[messageIndex] ?? forecast.reasons[0] ?? 'Commanders are assessing the battlefield.'
+
+  return (
+    <div className="battle-intel-details">
+      {combat ? (
+        <div className="intel-flag-header">
+          <IntelSide side="attacker" countryId={combat.attacker.countryId} countryName={combat.attacker.countryName} unitCount={combat.attacker.unitCount} />
+          <div className="intel-vs">VS</div>
+          <IntelSide side="defender" countryId={combat.defender.countryId} countryName={combat.defender.countryName} unitCount={combat.defender.unitCount} />
+        </div>
+      ) : (
+        <div className="intel-flag-header preview">
+          <div className="intel-side attacker">
+            <Swords size={18} />
+            <span>Attack Forecast</span>
+          </div>
+        </div>
+      )}
+      <div className={`forecast-result ${winnerClass}`}>
+        <strong>{winnerLabel}</strong>
+        <span>{forecast.confidence}% confidence</span>
+      </div>
+      <div className="forecast-meta">
+        <span>{formatTerrainName(forecast.terrain)}</span>
+        <span>{forecast.estimatedHours >= 720 ? '30d+' : `${forecast.estimatedHours}h`}</span>
+      </div>
+      <div className="forecast-side-grid">
+        <ForecastSide title="Attacker" side={forecast.attacker} />
+        <ForecastSide title="Defender" side={forecast.defender} />
+      </div>
+      <div className="battle-message">
+        <span>Battlefield report</span>
+        <strong>{currentMessage}</strong>
+      </div>
+      <div className="forecast-matchups">
+        <div>
+          <span>Armor / Piercing</span>
+          <strong>{Math.round(forecast.attacker.piercing)} vs {Math.round(forecast.defender.armor)}</strong>
+        </div>
+        <div>
+          <span>Logistics</span>
+          <strong>{Math.round(forecast.attacker.logisticsPenalty * 100)}% / {Math.round(forecast.defender.logisticsPenalty * 100)}%</strong>
+        </div>
+        <div>
+          <span>Fortification</span>
+          <strong>{Math.round(forecast.defender.fortificationLevel * 100)}%</strong>
+        </div>
+        <div>
+          <span>Supply</span>
+          <strong>{Math.round(forecast.attacker.supplyRatio * 100)}% / {Math.round(forecast.defender.supplyRatio * 100)}%</strong>
+        </div>
+        <div>
+          <span>Cut Off</span>
+          <strong>{forecast.attacker.encircledUnits} / {forecast.defender.encircledUnits}</strong>
+        </div>
+        <div>
+          <span>Lost Bns</span>
+          <strong>{forecast.attacker.destroyedBattalions + forecast.attacker.surrenderedBattalions} / {forecast.defender.destroyedBattalions + forecast.defender.surrenderedBattalions}</strong>
+        </div>
+      </div>
+      {forecast.reasons.length > 0 && (
+        <div className="forecast-reasons">
+          {forecast.messages.slice(0, 4).map((reason) => <span key={reason}>{reason}</span>)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function IntelSide({ side, countryId, countryName, unitCount }: { side: 'attacker' | 'defender'; countryId: string; countryName: string; unitCount: number }) {
+  return (
+    <div className={`intel-side ${side}`}>
+      <span className={`side-flag ${countryId === 'azerbaijan' ? 'az-flag' : 'am-flag'}`}></span>
+      <div>
+        <span>{countryName}</span>
+        <strong>{unitCount} units</strong>
+      </div>
+      <span className={`side-badge ${side === 'attacker' ? 'attacking' : 'defending'}`}>{side === 'attacker' ? 'ATK' : 'DEF'}</span>
+    </div>
+  )
+}
+
+function ForecastSide({ title, side }: { title: string; side: NonNullable<PrototypeHudState['battleForecast']>['attacker'] }) {
+  return (
+    <div className="forecast-side">
+      <span className="forecast-side-title">{title}</span>
+      <div><span>Score</span><strong>{Math.round(side.score)}</strong></div>
+      <div><span>Soft / Hard</span><strong>{Math.round(side.softAttack)} / {Math.round(side.hardAttack)}</strong></div>
+      <div><span>ORG</span><strong>{Math.round(side.organization)}/{Math.round(side.maxOrganization)}</strong></div>
+      <div><span>Losses</span><strong>{Math.round(side.projectedManpowerLoss)} MP</strong></div>
+    </div>
+  )
+}
+
+function UnitManagementPanel({ unit, logistics }: { unit: NonNullable<PrototypeHudState['selectedUnit']>; logistics: PrototypeHudState['logistics'] }) {
+  return (
+    <div className="panel-section training-panel unit-management-panel">
+      <div className="section-header">
+        <span className="header-icon">ðŸŽ–</span>
+        <span className="header-title">UNIT</span>
+      </div>
+      <div className="unit-details">
+        <div className="unit-header">
+          <span className="unit-name">{unit.name}</span>
+          <span className={`unit-owner ${unit.owner === 'Azerbaijan' ? 'az-color' : 'am-color'}`}>{unit.owner}</span>
+        </div>
+        <div className={`unit-status ${unit.isEncircled ? 'contested' : ''}`}>
+          {unit.isEncircled ? `Encircled ${Math.round(unit.encircledHours)}h` : unit.status}
+        </div>
+        <div className="unit-supply-card">
+          <div className="stat-bar-header">
+            <span className="stat-bar-label">Supply</span>
+            <span className="stat-bar-value">{Math.round(unit.supplyHours)}/{unit.maxSupplyHours}h</span>
+          </div>
+          <div className="stat-bar-track">
+            <div className="stat-bar-fill supply" style={{ width: `${Math.max(0, Math.min(100, (unit.supplyHours / unit.maxSupplyHours) * 100))}%` }}></div>
+          </div>
+          <span className="fortification-note">
+            Trucks {logistics.activeSupplyVehicleCount}/{logistics.supplyVehicleCount} active
+            {unit.hoursOutOfSupply > 0 ? ` / ${Math.round(unit.hoursOutOfSupply)}h out of supply` : ''}
+          </span>
+        </div>
+        <div className="fortification-meter">
+          <div className="stat-bar-header">
+            <span className="stat-bar-label">Fortification</span>
+            <span className="stat-bar-value">{Math.round(unit.fortificationLevel * 100)}%</span>
+          </div>
+          <div className="stat-bar-track">
+            <div className="stat-bar-fill fortification" style={{ width: `${unit.fortificationLevel * 100}%` }}></div>
+          </div>
+        </div>
+        <div className="unit-combat-stats">
+          <div className="combat-stat"><span className="combat-stat-label">ATK</span><span className="combat-stat-value">{unit.attack}</span></div>
+          <div className="combat-stat"><span className="combat-stat-label">DEF</span><span className="combat-stat-value">{unit.defense}</span></div>
+          <div className="combat-stat"><span className="combat-stat-label">BRK</span><span className="combat-stat-value">{unit.breakthrough}</span></div>
+          <div className="combat-stat"><span className="combat-stat-label">ARM</span><span className="combat-stat-value">{Math.round(unit.armor)}</span></div>
+          <div className="combat-stat"><span className="combat-stat-label">PEN</span><span className="combat-stat-value">{Math.round(unit.piercing)}</span></div>
+          <div className="combat-stat"><span className="combat-stat-label">REL</span><span className="combat-stat-value">{Math.round(unit.reliability * 100)}%</span></div>
+        </div>
+        <div className="battalion-status-list">
+          <span className="designer-column-title">Battalions</span>
+          {unit.battalions.map((battalion, index) => (
+            <div key={`${battalion.name}-${index}`} className={`battalion-status ${battalion.status}`}>
+              <div>
+                <span className="queue-title">{battalion.name}</span>
+                <span className="queue-subtitle">{battalion.status}</span>
+              </div>
+              <span>{Math.round(battalion.manpower)}/{battalion.maxManpower} MP</span>
+            </div>
+          ))}
+        </div>
+        <div className="recent-events">
+          <span className="designer-column-title">Recent Events</span>
+          {unit.recentCombatEvents.length > 0
+            ? unit.recentCombatEvents.slice(0, 5).map((event) => <span key={event}>{event}</span>)
+            : <span>No recent combat events</span>}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -869,6 +1105,7 @@ function BattlePopup({ combat }: BattlePopupProps) {
               <span className="stat-value">{combat.attacker.unitCount}</span>
             </div>
           </div>
+          <div className="side-confidence">{combat.confidence}% forecast</div>
         </div>
         <div className="battle-divider">VS</div>
         <div className="battle-side defender">

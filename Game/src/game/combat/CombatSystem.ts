@@ -1,6 +1,7 @@
 import type { EconomySystem } from '../economy/EconomySystem'
 import type { Province } from '../province/provinceTypes'
-import type { UnitState } from '../units/UnitTypes'
+import { getUnitEquipmentNeed, recalculateUnitFromBattalions, type UnitState } from '../units/UnitTypes'
+import { forecastBattle, isSideBroken, resolveCombatHour, type BattleProjection } from './CombatSimulator'
 
 export interface CombatInstance {
   id: string
@@ -10,6 +11,7 @@ export interface CombatInstance {
   participantUnitIds: string[]
   elapsedHours: number
   lastReport: string
+  lastProjection: BattleProjection | null
 }
 
 export interface CombatResolution {
@@ -20,7 +22,6 @@ export interface CombatResolution {
 export class CombatSystem {
   readonly combats = new Map<string, CombatInstance>()
   private nextCombatId = 1
-  private varianceStep = 0
 
   startCombat(province: Province, attacker: UnitState, units: UnitState[]): CombatInstance {
     if (province.combatId) {
@@ -42,6 +43,7 @@ export class CombatSystem {
       participantUnitIds: [],
       elapsedHours: 0,
       lastReport: 'Battle joined',
+      lastProjection: null,
     }
 
     this.nextCombatId += 1
@@ -67,18 +69,18 @@ export class CombatSystem {
       }
 
       combat.elapsedHours += 1
-      this.applyCombatRound(sides.attacker, sides.defender, province)
-      this.applyCombatRound(sides.defender, sides.attacker, province)
+      resolveCombatHour(sides.attacker, sides.defender, province, combat.elapsedHours)
+      combat.lastProjection = forecastBattle(sides.attacker, sides.defender, province)
 
-      const attackerDefeated = isSideDefeated(sides.attacker)
-      const defenderDefeated = isSideDefeated(sides.defender)
+      const attackerDefeated = isSideBroken(sides.attacker)
+      const defenderDefeated = isSideBroken(sides.defender)
 
       if (attackerDefeated || defenderDefeated) {
         const winningCountryId = attackerDefeated ? combat.defenderCountryId : combat.attackerCountryId
         this.handleDefeatedSide(attackerDefeated ? sides.attacker : sides.defender, province, provinces)
         resolutions.push(this.finishCombat(combat, province, winningCountryId, units))
       } else {
-        combat.lastReport = `${formatSide(sides.attacker)} vs ${formatSide(sides.defender)}`
+        combat.lastReport = formatBattleReport(combat.lastProjection)
       }
     }
 
@@ -96,6 +98,10 @@ export class CombatSystem {
 
   getSidesForOverlay(combat: CombatInstance, units: UnitState[]): { attacker: UnitState[]; defender: UnitState[] } {
     return this.getSides(combat, units)
+  }
+
+  getForecast(attackers: UnitState[], defenders: UnitState[], province: Province): BattleProjection {
+    return forecastBattle(attackers, defenders, province)
   }
 
   private refreshParticipants(combat: CombatInstance, province: Province, units: UnitState[]): void {
@@ -124,30 +130,6 @@ export class CombatSystem {
     }
   }
 
-  private applyCombatRound(attackers: UnitState[], defenders: UnitState[], province: Province): void {
-    const attackPower = getSideAttack(attackers, province)
-    const defensePower = getSideDefense(defenders, province)
-    const damage = Math.max(1, attackPower - defensePower * 0.45) * this.nextVariance()
-
-    for (const defender of defenders) {
-      const share = damage / defenders.length
-      const orgLoss = share * 0.62
-      const manpowerLoss = share * 1.4 * (1.05 - defender.reliability)
-      const equipmentLoss = share * 0.12 * (1.05 - defender.reliability)
-
-      defender.organization = Math.max(0, defender.organization - orgLoss)
-      defender.manpower = Math.max(0, defender.manpower - manpowerLoss)
-      defender.equipment = Math.max(0, defender.equipment - equipmentLoss)
-    }
-  }
-
-  private nextVariance(): number {
-    const values = [0.9, 0.96, 1.03, 1.1, 1.0]
-    const value = values[this.varianceStep % values.length]
-    this.varianceStep += 1
-    return value
-  }
-
   private handleDefeatedSide(defeatedUnits: UnitState[], province: Province, provinces: Province[]): void {
     for (const unit of defeatedUnits) {
       const retreatProvince = province.neighbors.map((provinceId) => provinces[provinceId]).find((candidate) => candidate.controllerCountryId === unit.countryId && !candidate.isContested)
@@ -155,6 +137,18 @@ export class CombatSystem {
       if (unit.manpower <= 0 || !retreatProvince) {
         unit.status = 'retreating'
         unit.manpower = 0
+        unit.equipment = 0
+        unit.battalions.forEach((battalion) => {
+          if (battalion.status !== 'destroyed') {
+            battalion.status = unit.isEncircled || unit.hoursOutOfSupply >= 24 ? 'surrendered' : 'destroyed'
+            battalion.manpower = 0
+            battalion.equipment = 0
+            battalion.organization = 0
+          }
+        })
+        unit.recentCombatEvents = [unit.isEncircled ? 'Division surrendered after being encircled' : 'Division destroyed with no safe retreat', ...unit.recentCombatEvents].slice(0, 8)
+        unit.fortificationDays = 0
+        unit.fortifiedProvinceId = null
         continue
       }
 
@@ -164,6 +158,12 @@ export class CombatSystem {
       unit.position.copy(retreatProvince.centerWorld.clone().setY(unit.position.y))
       unit.status = 'reinforcing'
       unit.reinforcementDelayHours = 24
+      unit.supplyHours = Math.min(unit.maxSupplyHours, unit.supplyHours + 12)
+      unit.hoursOutOfSupply = 0
+      unit.encircledHours = 0
+      unit.isEncircled = false
+      unit.fortificationDays = 0
+      unit.fortifiedProvinceId = retreatProvince.id
     }
   }
 
@@ -199,15 +199,18 @@ export class CombatSystem {
         continue
       }
 
-      unit.organization = Math.min(unit.maxOrganization, unit.organization + 5 / 24)
+      recoverBattalionOrganization(unit, 5 / 24)
+      unit.organization = unit.battalions.reduce((sum, battalion) => sum + battalion.organization, 0) / Math.max(1, unit.battalions.length)
 
       const manpowerNeed = unit.maxManpower - unit.manpower
       const equipmentNeed = unit.maxEquipment - unit.equipment
       const manpowerReinforced = economy.spendManpower(unit.countryId, Math.min(manpowerNeed, unit.maxManpower * 0.03 / 24))
-      const equipmentReinforced = economy.spendEquipment(unit.countryId, Math.min(equipmentNeed, unit.maxEquipment * 0.03 / 24))
+      const equipmentReinforcedLegacy = economy.spendEquipment(unit.countryId, Math.min(equipmentNeed, unit.maxEquipment * 0.015 / 24))
+      const equipmentFillRatio = economy.spendAvailableEquipmentStockpiles(unit.countryId, getUnitEquipmentNeed(unit), 0.03 / 24)
+      const equipmentReinforced = Math.min(equipmentNeed, equipmentReinforcedLegacy + unit.maxEquipment * 0.03 / 24 * equipmentFillRatio)
 
-      unit.manpower += manpowerReinforced
-      unit.equipment += equipmentReinforced
+      reinforceBattalions(unit, manpowerReinforced, equipmentReinforced)
+      recalculateUnitFromBattalions(unit)
 
       if (unit.organization >= unit.maxOrganization && unit.manpower >= unit.maxManpower && unit.equipment >= unit.maxEquipment) {
         unit.status = 'idle'
@@ -216,42 +219,58 @@ export class CombatSystem {
   }
 }
 
-function getSideAttack(units: UnitState[], province: Province): number {
-  return units.reduce((sum, unit) => {
-    const terrainModifier = unit.terrainProfile[province.terrainType]?.attack ?? 1
-    return sum + unit.attack * terrainModifier * getUnitEffectiveness(unit)
-  }, 0) * getStackingModifier(units.length)
+function reinforceBattalions(unit: UnitState, manpower: number, equipment: number): void {
+  distributeReinforcement(
+    manpower,
+    unit.battalions.filter((battalion) => battalion.status !== 'destroyed' && battalion.status !== 'surrendered').map((battalion) => ({
+      need: battalion.maxManpower - battalion.manpower,
+      apply: (amount: number) => {
+        battalion.manpower = Math.min(battalion.maxManpower, battalion.manpower + amount)
+      },
+    })),
+  )
+  distributeReinforcement(
+    equipment,
+    unit.battalions.filter((battalion) => battalion.status !== 'destroyed' && battalion.status !== 'surrendered').map((battalion) => ({
+      need: battalion.maxEquipment - battalion.equipment,
+      apply: (amount: number) => {
+        battalion.equipment = Math.min(battalion.maxEquipment, battalion.equipment + amount)
+      },
+    })),
+  )
 }
 
-function getSideDefense(units: UnitState[], province: Province): number {
-  return units.reduce((sum, unit) => {
-    const terrainModifier = unit.terrainProfile[province.terrainType]?.defense ?? 1
-    return sum + unit.defense * terrainModifier * getUnitEffectiveness(unit)
-  }, 0) * getStackingModifier(units.length)
-}
+function recoverBattalionOrganization(unit: UnitState, amount: number): void {
+  for (const battalion of unit.battalions) {
+    if (battalion.status === 'destroyed' || battalion.status === 'surrendered') {
+      continue
+    }
 
-function getUnitEffectiveness(unit: UnitState): number {
-  return Math.max(0.05, (unit.organization / unit.maxOrganization) * (unit.manpower / unit.maxManpower) * (unit.equipment / unit.maxEquipment))
-}
+    battalion.organization = Math.min(battalion.maxOrganization, battalion.organization + amount)
 
-function getStackingModifier(unitCount: number): number {
-  return unitCount <= 4 ? 1 : Math.max(0.35, 1 - (unitCount - 4) * 0.1)
-}
-
-function isSideDefeated(units: UnitState[]): boolean {
-  if (units.length === 0) {
-    return true
+    if (battalion.status === 'shattered' && battalion.organization >= battalion.maxOrganization * 0.42 && battalion.manpower >= battalion.maxManpower * 0.35 && battalion.equipment >= battalion.maxEquipment * 0.35) {
+      battalion.status = 'active'
+    }
   }
-
-  const totalManpower = units.reduce((sum, unit) => sum + unit.manpower, 0)
-  const totalMaxManpower = units.reduce((sum, unit) => sum + unit.maxManpower, 0)
-
-  return units.every((unit) => unit.organization <= 0) || totalManpower <= totalMaxManpower * 0.25
 }
 
-function formatSide(units: UnitState[]): string {
-  const manpower = units.reduce((sum, unit) => sum + unit.manpower, 0)
-  const organization = units.reduce((sum, unit) => sum + unit.organization, 0) / Math.max(1, units.length)
+function distributeReinforcement(amount: number, entries: Array<{ need: number; apply: (amount: number) => void }>): void {
+  let remaining = amount
+  let totalNeed = entries.reduce((sum, entry) => sum + Math.max(0, entry.need), 0)
 
-  return `${Math.round(manpower)} MP / ${Math.round(organization)} org`
+  for (const entry of entries) {
+    if (remaining <= 0 || totalNeed <= 0 || entry.need <= 0) {
+      continue
+    }
+
+    const share = Math.min(entry.need, amount * (entry.need / totalNeed), remaining)
+    entry.apply(share)
+    remaining -= share
+    totalNeed -= entry.need
+  }
+}
+
+function formatBattleReport(projection: BattleProjection): string {
+  const winner = projection.winner === 'attacker' ? 'attacker advantage' : projection.winner === 'defender' ? 'defender holding' : 'stalemate'
+  return `${winner} ${projection.confidence}% | ${Math.round(projection.attacker.manpower)} MP vs ${Math.round(projection.defender.manpower)} MP`
 }
