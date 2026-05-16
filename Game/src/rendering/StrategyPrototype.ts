@@ -182,10 +182,17 @@ const MILITARY_COMPLEX_DAILY_EQUIPMENT = 25
 const TRAINING_REFUND_MULTIPLIER = 0.5
 const MOVEMENT_SPEED_MULTIPLIER = 0.2
 const FORTIFICATION_DAYS_TO_MAX = 7
-const MAX_SUPPLY_HOURS = 72
-const SUPPLY_DISPATCH_THRESHOLD = 46
-const SUPPLY_DELIVERY_HOURS = 42
+const MAX_SUPPLY_HOURS = 168
+const SUPPLY_DISPATCH_THRESHOLD = 96
+const SUPPLY_DELIVERY_HOURS = 96
 const SUPPLY_VEHICLE_SPEED = 36
+const IDLE_SUPPLY_DEMAND_MULTIPLIER = 0.014
+const MOVING_SUPPLY_DEMAND_MULTIPLIER = 0.028
+const COMBAT_SUPPLY_DEMAND_MULTIPLIER = 0.055
+const ENCIRCLED_SUPPLY_DEMAND_MULTIPLIER = 0.075
+const MIN_IDLE_SUPPLY_DEMAND = 0.04
+const MIN_MOVING_SUPPLY_DEMAND = 0.08
+const MIN_COMBAT_SUPPLY_DEMAND = 0.16
 
 export class StrategyPrototype {
   private readonly container: HTMLDivElement
@@ -1170,7 +1177,7 @@ export class StrategyPrototype {
         continue
       }
 
-      const demand = Math.max(0.35, (unit.supplyUse + unit.fuelUse) / 3)
+      const demand = this.getHourlySupplyDemand(unit)
       unit.supplyHours = Math.max(0, unit.supplyHours - demand)
 
       const route = this.findSupplyRoute(unit)
@@ -1227,6 +1234,24 @@ export class StrategyPrototype {
       vehicle.cargoHours = SUPPLY_DELIVERY_HOURS
       this.supplyVehicleGroups.get(vehicle.id)?.position.copy(vehicle.position)
     }
+  }
+
+  private getHourlySupplyDemand(unit: UnitState): number {
+    const logisticsLoad = unit.supplyUse + unit.fuelUse
+
+    if (unit.isEncircled) {
+      return Math.max(MIN_COMBAT_SUPPLY_DEMAND, logisticsLoad * ENCIRCLED_SUPPLY_DEMAND_MULTIPLIER)
+    }
+
+    if (unit.status === 'inCombat') {
+      return Math.max(MIN_COMBAT_SUPPLY_DEMAND, logisticsLoad * COMBAT_SUPPLY_DEMAND_MULTIPLIER)
+    }
+
+    if (unit.status === 'moving' || unit.status === 'retreating' || unit.route.length > 0) {
+      return Math.max(MIN_MOVING_SUPPLY_DEMAND, logisticsLoad * MOVING_SUPPLY_DEMAND_MULTIPLIER)
+    }
+
+    return Math.max(MIN_IDLE_SUPPLY_DEMAND, logisticsLoad * IDLE_SUPPLY_DEMAND_MULTIPLIER)
   }
 
   private updateSupplyVehicles(delta: number): void {
