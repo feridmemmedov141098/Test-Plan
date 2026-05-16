@@ -51,8 +51,8 @@ export class ProvinceState {
 
   getCounts(): Record<CountryId, number> {
     return {
-      azerbaijan: this.getByCountry('azerbaijan').length,
-      armenia: this.getByCountry('armenia').length,
+      azerbaijan: this.provinces.filter((province) => province.controllerCountryId === 'azerbaijan').length,
+      armenia: this.provinces.filter((province) => province.controllerCountryId === 'armenia').length,
     }
   }
 }

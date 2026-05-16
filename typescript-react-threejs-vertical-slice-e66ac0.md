@@ -92,9 +92,15 @@ Each province stores:
 ```text
 id
 name
+displayName
+economyRegion
+primaryResource
+resourceYields
 countryId
 ownerCountryId
 controllerCountryId
+isContested
+combatId
 mesh
 centerWorld
 bounds
@@ -107,14 +113,19 @@ Definitions:
 - **countryId:** Original country from the GLB mesh prefix.
 - **ownerCountryId:** Legal owner, changed later by peace deals.
 - **controllerCountryId:** Military controller, changed during movement/capture.
+- **isContested:** True while opposing forces are fighting in the province.
+- **combatId:** Active combat reference when the province is contested.
 - **neighbors:** Connected province IDs used for movement and future supply.
+- **resourceYields:** Daily province contribution to the controlling country when not contested.
 
 ## 5. Province Rendering
 
 Province rendering rules:
 
 - Render one canonical mesh per province.
-- Tint province material by `controllerCountryId`.
+- Preserve original GLB materials/textures and render political color as a transparent overlay.
+- Tint province overlay by `controllerCountryId`.
+- Render contested provinces with a grey overlay.
 - Draw province boundaries with edge geometry or future outline passes.
 - Highlight selected province with emissive tint.
 - Use GLB mesh raycasting for province selection.
@@ -141,17 +152,18 @@ Inputs:
 - world-space province centers
 - movement cost modifiers later
 
-First prototype rules:
+Prototype rules:
 
 - Units can move across any connected province.
-- Capturing is instant when a unit enters an enemy-controlled province.
-- Armenia is passive.
+- Azerbaijan and Armenia start at war.
+- Enemy province entry starts occupation combat instead of instant capture.
+- If defenders are present, both sides fight before control changes.
+- If no defenders are present, the province is briefly contested and then captured on the next hourly combat tick.
+- Armenia is passive for movement orders.
 - Azerbaijan is player-controlled.
 
-Later rules:
+Later movement modifiers:
 
-- Enemy entry requires war.
-- Defender presence starts combat.
 - Terrain, roads, supply, and infrastructure affect movement cost.
 
 ## 7. Units
@@ -178,11 +190,64 @@ countryId
 provinceId
 routeProvinceIds
 speed
-strength
+manpower
+maxManpower
 organization
+maxOrganization
+equipment
+maxEquipment
+attack
+defense
+reliability
+experience
+status
+reinforcementDelayHours
 ```
 
-## 8. Prototype Gameplay Scope
+Starting units use `1000` manpower, `100` organization, `100` equipment, `12` attack, `10` defense, and `0.85` reliability.
+
+## 8. Economy
+
+The prototype economy uses compact gameplay resources:
+
+```text
+oil
+gas
+metal
+food
+industry
+energy
+manpower
+```
+
+Rules:
+
+- Economy ticks once per in-game day.
+- Controlled, uncontested provinces contribute their `resourceYields` to the controller.
+- Contested provinces contribute nothing.
+- Azerbaijan province metadata is keyed by loaded province code and researched resource group.
+- Armenian province economy is a balanced placeholder until detailed Armenian metadata is added.
+- Country economy stores stockpiles, daily income, manpower pool, and equipment pool.
+- Baku receives a capital economy bonus.
+
+## 9. Combat
+
+Combat starts when enemy units occupy the same province or when a unit enters enemy-controlled territory.
+
+Rules:
+
+- Combat resolves in hourly simulation ticks.
+- A contested province remains grey and does not change controller until combat ends.
+- Units in combat stop normal movement.
+- Attack, defense, organization, manpower, equipment, reliability, and stacking limits determine losses.
+- A side loses when all units have zero organization or total manpower falls below 25%.
+- Defeated surviving units retreat to a friendly neighboring province when possible.
+- Units with no valid retreat are destroyed.
+- The winner becomes province controller.
+- Surviving units keep losses and enter a 24-hour reinforcement delay.
+- After delay, units recover organization and slowly reinforce manpower/equipment from country pools.
+
+## 10. Prototype Gameplay Scope
 
 The first test prototype must support:
 
@@ -193,32 +258,34 @@ The first test prototype must support:
 - Select province and view owner/controller.
 - Select unit and issue movement order.
 - Move units through province graph.
-- Instantly capture provinces on arrival.
+- Start combat in enemy provinces.
+- Show contested grey province overlay.
+- Resolve battles and capture provinces after victory.
 - Update province color and HUD after capture.
+- Show selected province resource yields.
+- Show country daily income and stockpiles.
+- Show selected unit combat stats and reinforcement delay.
 
 Out of scope for this pass:
 
-- Full combat resolution.
-- Economy screens.
 - Diplomacy screens.
 - Save/load.
 - AI movement.
 - Supply calculations.
 - Production and division designer.
 
-## 9. Later Systems
+## 11. Later Systems
 
 After the province prototype works:
 
-- Add combat when opposing units occupy/enter the same province.
 - Add province terrain and movement-cost metadata.
 - Add supply hubs and capital-based supply paths over the province graph.
-- Add economy resources and buildings per province.
+- Add buildings, production queues, and equipment manufacturing.
 - Add diplomatic war states.
 - Add Armenian defensive AI.
 - Add save/load using province and unit state snapshots.
 
-## 10. Acceptance Criteria
+## 12. Acceptance Criteria
 
 The province prototype is complete when:
 
@@ -231,6 +298,11 @@ The province prototype is complete when:
 - 5 Azerbaijan and 5 Armenia units spawn.
 - Player can select Azerbaijan units and move them.
 - Movement follows province adjacency.
-- Entered enemy provinces change controller.
-- HUD shows selected province owner/controller and selected unit data.
+- Enemy province entry starts combat or occupation.
+- Contested provinces turn grey.
+- Combat losses persist after battle.
+- Reinforcement slowly restores unit losses from country pools.
+- Winning side changes province controller.
+- HUD shows selected province owner/controller/resources and selected unit combat data.
+- Economy stockpiles and daily income are visible.
 - `npm.cmd run build` and `npm.cmd run lint` pass.

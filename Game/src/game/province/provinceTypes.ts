@@ -4,13 +4,28 @@ export const PROVINCE_MAP_URL = '/data/maps/Map.glb'
 export const UNIT_MODEL_URL = '/data/maps/Unit_A.glb'
 
 export type CountryId = 'azerbaijan' | 'armenia'
+export type ResourceId = 'oil' | 'gas' | 'metal' | 'food' | 'industry' | 'energy' | 'manpower'
+export type ResourceYields = Record<ResourceId, number>
+
+export interface ProvinceMetadata {
+  displayName: string
+  economyRegion: string
+  primaryResource: ResourceId
+  resourceYields: ResourceYields
+}
 
 export interface Province {
   id: number
   name: string
+  displayName: string
+  economyRegion: string
+  primaryResource: ResourceId
+  resourceYields: ResourceYields
   countryId: CountryId
   ownerCountryId: CountryId
   controllerCountryId: CountryId
+  isContested: boolean
+  combatId: string | null
   mesh: THREE.Mesh
   centerWorld: THREE.Vector3
   bounds: THREE.Box3

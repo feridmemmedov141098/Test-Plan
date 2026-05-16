@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { getProvinceMetadata } from '../game/province/provinceMetadata'
 import {
   COUNTRY_COLORS,
   PROVINCE_MAP_URL,
@@ -12,6 +13,7 @@ const WORLD_SIZE = 210
 const EDGE_Y_OFFSET = 0.18
 const PROVINCE_Y_OFFSET = 0.02
 const POLITICAL_OVERLAY_Y_OFFSET = 0.08
+const CONTESTED_COLOR = 0x77736b
 
 export class ProvinceMapRenderer {
   readonly object = new THREE.Group()
@@ -74,6 +76,7 @@ export class ProvinceMapRenderer {
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([name, mesh], id): Province => {
         const countryId = countryFromProvinceName(name)!
+        const metadata = getProvinceMetadata(name, countryId)
         const provinceBounds = new THREE.Box3().setFromObject(mesh)
         const centerWorld = new THREE.Vector3()
         provinceBounds.getCenter(centerWorld)
@@ -84,9 +87,15 @@ export class ProvinceMapRenderer {
         return {
           id,
           name,
+          displayName: metadata.displayName,
+          economyRegion: metadata.economyRegion,
+          primaryResource: metadata.primaryResource,
+          resourceYields: metadata.resourceYields,
           countryId,
           ownerCountryId: countryId,
           controllerCountryId: countryId,
+          isContested: false,
+          combatId: null,
           mesh,
           centerWorld,
           bounds: provinceBounds,
@@ -114,7 +123,7 @@ export class ProvinceMapRenderer {
       return
     }
 
-    updatePoliticalOverlayMaterial(overlay.material, province.controllerCountryId, province.id === this.selectedProvinceId)
+    updatePoliticalOverlayMaterial(overlay.material, province.controllerCountryId, province.id === this.selectedProvinceId, province.isContested)
   }
 
   setSelectedProvince(province: Province | null): void {
@@ -126,7 +135,8 @@ export class ProvinceMapRenderer {
 
       if (previousOverlay) {
         const previousCountry = previousOverlay.userData.controllerCountryId as Province['controllerCountryId'] | undefined
-        updatePoliticalOverlayMaterial(previousOverlay.material, previousCountry ?? 'azerbaijan', false)
+        const previousContested = Boolean(previousOverlay.userData.isContested)
+        updatePoliticalOverlayMaterial(previousOverlay.material, previousCountry ?? 'azerbaijan', false, previousContested)
       }
     }
 
@@ -139,6 +149,7 @@ export class ProvinceMapRenderer {
     for (const province of provinces) {
       province.mesh.userData.controllerCountryId = province.controllerCountryId
       this.politicalOverlays.get(province.id)!.userData.controllerCountryId = province.controllerCountryId
+      this.politicalOverlays.get(province.id)!.userData.isContested = province.isContested
       this.updateProvinceColor(province)
     }
   }
@@ -187,6 +198,7 @@ export class ProvinceMapRenderer {
       overlay.frustumCulled = false
       overlay.userData.provinceId = province.id
       overlay.userData.controllerCountryId = province.controllerCountryId
+      overlay.userData.isContested = province.isContested
       this.politicalOverlays.set(province.id, overlay)
       this.politicalOverlayGroup.add(overlay)
     }
@@ -272,9 +284,10 @@ function updatePoliticalOverlayMaterial(
   material: THREE.MeshBasicMaterial,
   countryId: Province['controllerCountryId'],
   isSelected: boolean,
+  isContested: boolean,
 ): void {
-  material.color.setHex(COUNTRY_COLORS[countryId])
-  material.opacity = isSelected ? 0.58 : 0.36
+  material.color.setHex(isContested ? CONTESTED_COLOR : COUNTRY_COLORS[countryId])
+  material.opacity = isContested ? 0.68 : isSelected ? 0.58 : 0.36
   material.needsUpdate = true
 }
 

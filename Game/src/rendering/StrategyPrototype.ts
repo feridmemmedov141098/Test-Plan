@@ -1,9 +1,15 @@
 import * as THREE from 'three'
+import { CombatSystem, type CombatInstance } from '../game/combat/CombatSystem'
+import { EconomySystem, type EconomyState } from '../game/economy/EconomySystem'
 import { ProvincePathfindingSystem } from '../game/movement/ProvincePathfindingSystem'
 import { ProvinceState } from '../game/province/ProvinceState'
 import { COUNTRY_COLORS, COUNTRY_NAMES, type CountryId, type Province } from '../game/province/provinceTypes'
+import type { ResourceYields } from '../game/province/provinceTypes'
+import type { UnitState } from '../game/units/UnitTypes'
 import { ProvinceMapRenderer } from './ProvinceMapRenderer'
 import { UnitModelFactory } from './UnitModelFactory'
+
+export type TimeSpeed = 0 | 1 | 2 | 5 | 10
 
 export interface PrototypeHudState {
   isLoading: boolean
@@ -13,8 +19,34 @@ export interface PrototypeHudState {
     ownerName: string
     controllerName: string
     unitCount: number
+    economyRegion: string
+    primaryResource: string
+    resourceYields: ResourceYields
+    isContested: boolean
   } | null
-  selectedUnit: { name: string; owner: string } | null
+  selectedUnit: {
+    name: string
+    owner: string
+    status: string
+    manpower: number
+    maxManpower: number
+    organization: number
+    maxOrganization: number
+    equipment: number
+    maxEquipment: number
+    attack: number
+    defense: number
+    reliability: number
+    reinforcementDelayHours: number
+  } | null
+  economy: EconomyState | null
+  activeCombat: CombatInstance | null
+  activeCombats: ActiveCombatOverlay[]
+  time: {
+    day: number
+    hour: number
+    speed: TimeSpeed
+  }
   mapStats: {
     provinceCount: number
     azProvinceCount: number
@@ -24,23 +56,36 @@ export interface PrototypeHudState {
   } | null
 }
 
-interface UnitState {
+export interface ActiveCombatOverlay {
   id: string
-  name: string
-  countryId: CountryId
-  owner: string
   provinceId: number
-  position: THREE.Vector3
-  route: THREE.Vector3[]
-  routeProvinceIds: number[]
-  routeIndex: number
-  speed: number
+  screenPosition: { x: number; y: number } | null
+  attacker: {
+    countryId: string
+    countryName: string
+    totalManpower: number
+    totalMaxManpower: number
+    avgOrganization: number
+    maxOrganization: number
+    unitCount: number
+  }
+  defender: {
+    countryId: string
+    countryName: string
+    totalManpower: number
+    totalMaxManpower: number
+    avgOrganization: number
+    maxOrganization: number
+    unitCount: number
+  }
+  advantage: 'attacker' | 'defender' | 'even'
 }
 
 type HudCallback = (state: PrototypeHudState) => void
 
 const BASE_CAMERA_HEIGHT = 190
 const UNIT_Y = 2.2
+const SIM_HOURS_PER_SECOND = 6
 
 export class StrategyPrototype {
   private readonly container: HTMLDivElement
@@ -53,6 +98,8 @@ export class StrategyPrototype {
   private readonly cameraTarget = new THREE.Vector3(0, 0, 0)
   private readonly mapRenderer = new ProvinceMapRenderer()
   private readonly unitFactory = new UnitModelFactory()
+  private readonly economySystem = new EconomySystem()
+  private readonly combatSystem = new CombatSystem()
   private readonly units: UnitState[] = []
   private readonly unitGroups = new Map<string, THREE.Group>()
   private readonly unitHitMeshes: THREE.Object3D[] = []
@@ -67,6 +114,14 @@ export class StrategyPrototype {
   private selectedUnitId: string | null = null
   private isMiddleDragging = false
   private lastPointer = { x: 0, y: 0 }
+  private simHourAccumulator = 0
+  private currentDay = 1
+  private currentHour = 0
+  private timeSpeed: TimeSpeed = 1
+  private hudStatus = 'Loading province map'
+  private hudUpdateTimer = 0
+  private isDisposed = false
+  private readonly HUD_UPDATE_INTERVAL = 0.15
 
   constructor(container: HTMLDivElement, setHudState: HudCallback) {
     this.container = container
@@ -75,10 +130,18 @@ export class StrategyPrototype {
 
   async start(): Promise<void> {
     try {
+      if (this.isDisposed) {
+        return
+      }
+
       this.setHudState({
         isLoading: true,
         selectedProvince: null,
         selectedUnit: null,
+        economy: null,
+        activeCombat: null,
+        activeCombats: [],
+        time: { day: 1, hour: 0, speed: 1 },
         status: 'Loading province map',
         mapStats: null,
       })
@@ -87,22 +150,41 @@ export class StrategyPrototype {
       this.setupCamera()
       this.setupLighting()
       const provinces = await this.mapRenderer.load()
+
+      if (this.isDisposed) {
+        return
+      }
+
       this.provinceState = new ProvinceState(provinces)
       this.pathfinding = new ProvincePathfindingSystem(this.provinceState.provinces)
       this.mapRenderer.refreshAllProvinceColors(this.provinceState.provinces)
       this.scene.add(this.mapRenderer.object)
       await this.unitFactory.load()
+
+      if (this.isDisposed) {
+        return
+      }
+
       this.createSelectionMeshes()
       this.createUnits()
+      this.economySystem.tickDaily(this.provinceState.provinces)
       this.addEventListeners()
       this.resize()
       this.updateHud('Map ready')
       this.animate()
     } catch (error) {
+      if (this.isDisposed) {
+        return
+      }
+
       this.setHudState({
         isLoading: false,
         selectedProvince: null,
         selectedUnit: null,
+        economy: null,
+        activeCombat: null,
+        activeCombats: [],
+        time: { day: this.currentDay, hour: this.currentHour, speed: this.timeSpeed },
         status: error instanceof Error ? error.message : 'Province map failed to load',
         mapStats: null,
       })
@@ -110,6 +192,7 @@ export class StrategyPrototype {
   }
 
   dispose(): void {
+    this.isDisposed = true
     cancelAnimationFrame(this.animationFrame)
     window.removeEventListener('resize', this.resize)
     window.removeEventListener('keydown', this.handleKeyDown)
@@ -217,6 +300,18 @@ export class StrategyPrototype {
       routeProvinceIds: [],
       routeIndex: 0,
       speed: 22,
+      manpower: 1000,
+      maxManpower: 1000,
+      organization: 100,
+      maxOrganization: 100,
+      equipment: 100,
+      maxEquipment: 100,
+      attack: 12,
+      defense: 10,
+      reliability: 0.85,
+      experience: 0,
+      status: 'idle',
+      reinforcementDelayHours: 0,
     }
     const group = this.unitFactory.create(COUNTRY_COLORS[countryId])
     group.position.copy(unit.position)
@@ -264,6 +359,19 @@ export class StrategyPrototype {
 
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
     this.keyState.add(event.code)
+
+    if (event.code === 'Space') {
+      event.preventDefault()
+      this.setTimeSpeed(this.timeSpeed === 0 ? 1 : 0)
+    } else if (event.code === 'Digit1' || event.code === 'Numpad1') {
+      this.setTimeSpeed(1)
+    } else if (event.code === 'Digit2' || event.code === 'Numpad2') {
+      this.setTimeSpeed(2)
+    } else if (event.code === 'Digit3' || event.code === 'Numpad3') {
+      this.setTimeSpeed(5)
+    } else if (event.code === 'Digit4' || event.code === 'Numpad4') {
+      this.setTimeSpeed(10)
+    }
   }
 
   private readonly handleKeyUp = (event: KeyboardEvent): void => {
@@ -359,7 +467,17 @@ export class StrategyPrototype {
     const targetProvince = this.pickProvince(event)
     const unit = this.units.find((entry) => entry.id === this.selectedUnitId)
 
-    if (!targetProvince || !unit) {
+    if (!targetProvince || !unit || unit.manpower <= 0) {
+      return
+    }
+
+    if (unit.status === 'inCombat') {
+      this.updateHud('Unit is in combat')
+      return
+    }
+
+    if (targetProvince.controllerCountryId !== unit.countryId && !areAtWar(unit.countryId, targetProvince.controllerCountryId)) {
+      this.updateHud('Target country is not at war')
       return
     }
 
@@ -373,6 +491,7 @@ export class StrategyPrototype {
     unit.routeProvinceIds = path
     unit.route = path.map((provinceId) => this.provinceState!.getProvince(provinceId).centerWorld.clone().setY(UNIT_Y))
     unit.routeIndex = 0
+    unit.status = 'moving'
     this.selectedProvinceId = targetProvince.id
     this.setSelectedProvince(targetProvince.id)
     this.updateSelectionVisuals()
@@ -412,13 +531,82 @@ export class StrategyPrototype {
   }
 
   private readonly animate = (): void => {
+    if (this.isDisposed) {
+      return
+    }
+
     const delta = Math.min(this.clock.getDelta(), 0.05)
 
     this.updateCamera(delta)
     this.updateUnits(delta)
     this.updateSelectionVisuals()
+    this.updateSimulation(delta)
+
+    this.hudUpdateTimer += delta
+    if (this.hudUpdateTimer >= this.HUD_UPDATE_INTERVAL) {
+      this.hudUpdateTimer = 0
+      if (this.timeSpeed === 0) {
+        this.updateHud()
+      } else if (this.combatSystem.combats.size > 0) {
+        this.updateHud('Combat ongoing')
+      } else if (this.selectedUnitId) {
+        this.updateHud('Reinforcements updating')
+      } else {
+        this.updateHud()
+      }
+    }
+
     this.renderer?.render(this.scene, this.camera!)
     this.animationFrame = requestAnimationFrame(this.animate)
+  }
+
+  private updateSimulation(delta: number): void {
+    if (!this.provinceState) {
+      return
+    }
+
+    if (this.timeSpeed === 0) {
+      return
+    }
+
+    this.simHourAccumulator += delta * SIM_HOURS_PER_SECOND * this.timeSpeed
+
+    let hoursProcessed = 0
+    const maxHoursPerFrame = 60 * this.timeSpeed
+
+    while (this.simHourAccumulator >= 1 && hoursProcessed < maxHoursPerFrame) {
+      this.simHourAccumulator -= 1
+      this.currentHour += 1
+      hoursProcessed += 1
+
+      const resolutions = this.combatSystem.tickHourly(this.provinceState.provinces, this.units, this.economySystem)
+
+      if (resolutions.length > 0) {
+        this.mapRenderer.refreshAllProvinceColors(this.provinceState.provinces)
+        this.syncUnitVisuals()
+        this.updateHud(resolutions.at(-1)!.status)
+      }
+
+      if (this.currentHour >= 24) {
+        this.currentHour = 0
+        this.currentDay += 1
+        this.economySystem.tickDaily(this.provinceState.provinces)
+      }
+    }
+
+    if (hoursProcessed > 0) {
+      this.syncUnitVisuals()
+    }
+  }
+
+  setTimeSpeed(speed: TimeSpeed): void {
+    if (this.isDisposed) {
+      return
+    }
+
+    this.timeSpeed = speed
+    this.hudUpdateTimer = 0
+    this.updateHud(speed === 0 ? 'Paused' : `Speed ${speed}x`)
   }
 
   private updateCamera(delta: number): void {
@@ -454,7 +642,17 @@ export class StrategyPrototype {
       return
     }
 
+    if (this.timeSpeed === 0) {
+      return
+    }
+
+    const scaledDelta = delta * this.timeSpeed
+
     for (const unit of this.units) {
+      if (unit.status === 'inCombat' || unit.manpower <= 0) {
+        continue
+      }
+
       const target = unit.route[unit.routeIndex]
 
       if (!target) {
@@ -463,7 +661,7 @@ export class StrategyPrototype {
 
       const direction = target.clone().sub(unit.position)
       const distance = direction.length()
-      const travel = unit.speed * delta
+      const travel = unit.speed * scaledDelta
 
       if (distance <= travel) {
         unit.position.copy(target)
@@ -478,6 +676,9 @@ export class StrategyPrototype {
         unit.route = []
         unit.routeProvinceIds = []
         unit.routeIndex = 0
+        if (unit.status === 'moving') {
+          unit.status = 'idle'
+        }
       }
 
       this.unitGroups.get(unit.id)?.position.copy(unit.position)
@@ -495,10 +696,18 @@ export class StrategyPrototype {
     province.units.push(unit.id)
     unit.provinceId = provinceId
 
-    if (this.provinceState.setController(provinceId, unit.countryId)) {
+    const enemyUnit = province.units
+      .map((unitId) => this.units.find((entry) => entry.id === unitId))
+      .find((provinceUnit) => provinceUnit && provinceUnit.countryId !== unit.countryId && provinceUnit.manpower > 0)
+    const hasEnemyUnits = Boolean(enemyUnit)
+    const isEnemyControlled = province.controllerCountryId !== unit.countryId
+    const enemyCountryId = enemyUnit?.countryId ?? province.controllerCountryId
+
+    if ((hasEnemyUnits || isEnemyControlled) && areAtWar(unit.countryId, enemyCountryId)) {
+      this.combatSystem.startCombat(province, unit, this.units)
       this.mapRenderer.refreshAllProvinceColors(this.provinceState.provinces)
       this.setSelectedProvince(this.selectedProvinceId)
-      this.updateHud('Province captured')
+      this.updateHud('Battle started')
     }
   }
 
@@ -521,27 +730,77 @@ export class StrategyPrototype {
     }
   }
 
-  private updateHud(status: string): void {
-    if (!this.provinceState) {
+  private syncUnitVisuals(): void {
+    for (const unit of this.units) {
+      const group = this.unitGroups.get(unit.id)
+
+      if (!group) {
+        continue
+      }
+
+      group.visible = unit.manpower > 0
+      group.position.copy(unit.position)
+    }
+  }
+
+  private updateHud(status = this.hudStatus): void {
+    if (this.isDisposed || !this.provinceState) {
       return
     }
+
+    this.hudStatus = status
 
     const selectedProvince = this.selectedProvinceId === null ? null : this.provinceState.getProvince(this.selectedProvinceId)
     const selectedUnit = this.units.find((unit) => unit.id === this.selectedUnitId) ?? null
     const counts = this.provinceState.getCounts()
+    const activeCombat = selectedProvince
+      ? this.combatSystem.getActiveCombatForProvince(selectedProvince.id)
+      : selectedUnit
+        ? this.combatSystem.getActiveCombatForUnit(selectedUnit.id)
+        : null
+
+    const activeCombats = this.buildActiveCombatOverlays()
 
     this.setHudState({
       isLoading: false,
       status,
       selectedProvince: selectedProvince
         ? {
-            name: selectedProvince.name,
+            name: `${selectedProvince.displayName} (${selectedProvince.name})`,
             ownerName: COUNTRY_NAMES[selectedProvince.ownerCountryId],
             controllerName: COUNTRY_NAMES[selectedProvince.controllerCountryId],
             unitCount: selectedProvince.units.length,
+            economyRegion: selectedProvince.economyRegion,
+            primaryResource: selectedProvince.primaryResource,
+            resourceYields: selectedProvince.resourceYields,
+            isContested: selectedProvince.isContested,
           }
         : null,
-      selectedUnit: selectedUnit ? { name: selectedUnit.name, owner: selectedUnit.owner } : null,
+      selectedUnit: selectedUnit
+        ? {
+            name: selectedUnit.name,
+            owner: selectedUnit.owner,
+            status: selectedUnit.status,
+            manpower: selectedUnit.manpower,
+            maxManpower: selectedUnit.maxManpower,
+            organization: selectedUnit.organization,
+            maxOrganization: selectedUnit.maxOrganization,
+            equipment: selectedUnit.equipment,
+            maxEquipment: selectedUnit.maxEquipment,
+            attack: selectedUnit.attack,
+            defense: selectedUnit.defense,
+            reliability: selectedUnit.reliability,
+            reinforcementDelayHours: selectedUnit.reinforcementDelayHours,
+          }
+        : null,
+      economy: this.economySystem.countries,
+      activeCombat,
+      activeCombats,
+      time: {
+        day: this.currentDay,
+        hour: this.currentHour,
+        speed: this.timeSpeed,
+      },
       mapStats: {
         provinceCount: this.provinceState.provinces.length,
         azProvinceCount: counts.azerbaijan,
@@ -550,6 +809,70 @@ export class StrategyPrototype {
         amUnitCount: this.units.filter((unit) => unit.countryId === 'armenia').length,
       },
     })
+  }
+
+  private buildActiveCombatOverlays(): ActiveCombatOverlay[] {
+    if (!this.provinceState || !this.camera) return []
+
+    const overlays: ActiveCombatOverlay[] = []
+
+    for (const combat of this.combatSystem.combats.values()) {
+      const province = this.provinceState.getProvince(combat.provinceId)
+      const sides = this.combatSystem.getSidesForOverlay(combat, this.units)
+
+      const attackerSide = sides.attacker
+      const defenderSide = sides.defender
+
+      const attackerManpower = attackerSide.reduce((sum, u) => sum + u.manpower, 0)
+      const attackerMaxManpower = attackerSide.reduce((sum, u) => sum + u.maxManpower, 0)
+      const attackerAvgOrg = attackerSide.length > 0 ? attackerSide.reduce((sum, u) => sum + u.organization, 0) / attackerSide.length : 0
+      const attackerMaxOrg = attackerSide.length > 0 ? Math.max(...attackerSide.map(u => u.maxOrganization)) : 100
+
+      const defenderManpower = defenderSide.reduce((sum, u) => sum + u.manpower, 0)
+      const defenderMaxManpower = defenderSide.reduce((sum, u) => sum + u.maxManpower, 0)
+      const defenderAvgOrg = defenderSide.length > 0 ? defenderSide.reduce((sum, u) => sum + u.organization, 0) / defenderSide.length : 0
+      const defenderMaxOrg = defenderSide.length > 0 ? Math.max(...defenderSide.map(u => u.maxOrganization)) : 100
+
+      const attackerEffectiveness = (attackerManpower / Math.max(1, attackerMaxManpower)) * (attackerAvgOrg / Math.max(1, attackerMaxOrg))
+      const defenderEffectiveness = (defenderManpower / Math.max(1, defenderMaxManpower)) * (defenderAvgOrg / Math.max(1, defenderMaxOrg))
+
+      let advantage: 'attacker' | 'defender' | 'even' = 'even'
+      if (attackerEffectiveness > defenderEffectiveness * 1.15) advantage = 'attacker'
+      else if (defenderEffectiveness > attackerEffectiveness * 1.15) advantage = 'defender'
+
+      const worldPos = new THREE.Vector3(province.centerWorld.x, province.centerWorld.y + 12, province.centerWorld.z)
+      worldPos.project(this.camera!)
+      const containerRect = this.container.getBoundingClientRect()
+      const screenX = (worldPos.x * 0.5 + 0.5) * containerRect.width
+      const screenY = (-worldPos.y * 0.5 + 0.5) * containerRect.height
+
+      overlays.push({
+        id: combat.id,
+        provinceId: combat.provinceId,
+        screenPosition: { x: screenX, y: screenY },
+        attacker: {
+          countryId: combat.attackerCountryId,
+          countryName: COUNTRY_NAMES[combat.attackerCountryId],
+          totalManpower: Math.round(attackerManpower),
+          totalMaxManpower: attackerMaxManpower,
+          avgOrganization: Math.round(attackerAvgOrg),
+          maxOrganization: attackerMaxOrg,
+          unitCount: attackerSide.length,
+        },
+        defender: {
+          countryId: combat.defenderCountryId,
+          countryName: COUNTRY_NAMES[combat.defenderCountryId],
+          totalManpower: Math.round(defenderManpower),
+          totalMaxManpower: defenderMaxManpower,
+          avgOrganization: Math.round(defenderAvgOrg),
+          maxOrganization: defenderMaxOrg,
+          unitCount: defenderSide.length,
+        },
+        advantage,
+      })
+    }
+
+    return overlays
   }
 
   private setSelectedProvince(provinceId: number | null): void {
@@ -578,4 +901,8 @@ function pickSpawnProvinces(provinces: Province[], count: number): Province[] {
   }
 
   return result
+}
+
+function areAtWar(left: CountryId, right: CountryId): boolean {
+  return left !== right
 }
