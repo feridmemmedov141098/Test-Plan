@@ -1,18 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Factory, Flame, Fuel, Pickaxe, Users, Wheat, Zap, Hammer, Plus, X, Save, Trash2, PencilRuler } from 'lucide-react'
 import './App.css'
+import { BUILDING_DEFINITIONS, type BuildingType } from './game/economy/ConstructionTypes'
 import type { ResourceId, ResourceYields } from './game/province/provinceTypes'
+import {
+  BATTALION_DEFINITIONS,
+  calculateDivisionStats,
+  MAX_BATTALIONS_PER_TEMPLATE,
+  type BattalionType,
+  type DivisionNode,
+  type DivisionTemplate,
+} from './game/units/DivisionDesignerTypes'
 import { StrategyPrototype, type ActiveCombatOverlay, type PrototypeHudState, type TimeSpeed } from './rendering/StrategyPrototype'
 
 const PLAYER_COUNTRY_ID = 'azerbaijan'
 const RESOURCE_ORDER: ResourceId[] = ['manpower', 'industry', 'oil', 'gas', 'metal', 'food', 'energy']
-const RESOURCE_META: Record<ResourceId, { label: string; icon: string }> = {
-  manpower: { label: 'Manpower', icon: 'MP' },
-  industry: { label: 'Industry', icon: 'IN' },
-  oil: { label: 'Oil', icon: 'OL' },
-  gas: { label: 'Gas', icon: 'GS' },
-  metal: { label: 'Metal', icon: 'MT' },
-  food: { label: 'Food', icon: 'FD' },
-  energy: { label: 'Energy', icon: 'EN' },
+const RESOURCE_META: Record<ResourceId, { label: string; Icon: typeof Users }> = {
+  manpower: { label: 'Manpower', Icon: Users },
+  industry: { label: 'Industry', Icon: Factory },
+  oil: { label: 'Oil', Icon: Fuel },
+  gas: { label: 'Gas', Icon: Flame },
+  metal: { label: 'Metal', Icon: Pickaxe },
+  food: { label: 'Food', Icon: Wheat },
+  energy: { label: 'Energy', Icon: Zap },
 }
 
 const initialHudState: PrototypeHudState = {
@@ -20,6 +30,18 @@ const initialHudState: PrototypeHudState = {
   selectedProvince: null,
   selectedUnit: null,
   economy: null,
+  construction: {
+    jobs: [],
+    playerBuildings: { barracks: 0, militaryComplex: 0 },
+    validConstructionProvinceIds: [],
+  },
+  training: {
+    jobs: [],
+    templates: [],
+    validDeploymentProvinceIds: [],
+    trainingSlots: 0,
+    activeTrainingCount: 0,
+  },
   activeCombat: null,
   activeCombats: [],
   time: { day: 1, hour: 0, speed: 1 },
@@ -31,8 +53,12 @@ function App() {
   const mountRef = useRef<HTMLDivElement | null>(null)
   const prototypeRef = useRef<StrategyPrototype | null>(null)
   const [hudState, setHudState] = useState<PrototypeHudState>(initialHudState)
+  const [isDesignerOpen, setIsDesignerOpen] = useState(false)
+  const [deploymentProvinceId, setDeploymentProvinceId] = useState<number | null>(null)
   const playerEconomy = hudState.economy?.[PLAYER_COUNTRY_ID] ?? null
-  const showLegacyEconomyPanel: boolean = false
+  const selectedProvinceId = hudState.selectedProvince?.id ?? null
+  const activeDeploymentProvinceId = deploymentProvinceId ?? selectedProvinceId ?? hudState.training.validDeploymentProvinceIds[0] ?? null
+  const showLegacyEconomyPanel = hudState.time.day < 0
 
   useEffect(() => {
     const mount = mountRef.current
@@ -53,6 +79,20 @@ function App() {
 
   const setTimeSpeed = useCallback((speed: TimeSpeed) => {
     prototypeRef.current?.setTimeSpeed(speed)
+  }, [])
+
+  const queueConstruction = useCallback((buildingType: BuildingType) => {
+    if (selectedProvinceId === null) return
+    prototypeRef.current?.queueConstruction(selectedProvinceId, buildingType)
+  }, [selectedProvinceId])
+
+  const queueTraining = useCallback((templateId: string) => {
+    if (activeDeploymentProvinceId === null) return
+    prototypeRef.current?.queueDivisionTraining(templateId, activeDeploymentProvinceId)
+  }, [activeDeploymentProvinceId])
+
+  const saveTemplate = useCallback((draft: { id?: string; name: string; nodes: DivisionNode[] }) => {
+    prototypeRef.current?.saveDivisionTemplate(draft)
   }, [])
 
   return (
@@ -191,6 +231,107 @@ function App() {
           </div>
         </div>
 
+        <div className="panel-section construction-panel">
+          <div className="section-header">
+            <Hammer className="section-icon-svg" size={16} />
+            <span className="header-title">CONSTRUCTION</span>
+          </div>
+          <div className="building-summary">
+            <span>Barracks {hudState.construction.playerBuildings.barracks}</span>
+            <span>Military Complexes {hudState.construction.playerBuildings.militaryComplex}</span>
+          </div>
+          <div className="construction-actions">
+            {(Object.keys(BUILDING_DEFINITIONS) as BuildingType[]).map((buildingType) => {
+              const building = BUILDING_DEFINITIONS[buildingType]
+              const disabled =
+                selectedProvinceId === null ||
+                !hudState.construction.validConstructionProvinceIds.includes(selectedProvinceId) ||
+                hudState.construction.jobs.length >= 2
+
+              return (
+                <button key={buildingType} className="management-btn" disabled={disabled} onClick={() => queueConstruction(buildingType)}>
+                  <Plus size={14} />
+                  <span>{building.name}</span>
+                </button>
+              )
+            })}
+          </div>
+          <div className="queue-list">
+            {hudState.construction.jobs.length > 0 ? hudState.construction.jobs.map((job) => (
+              <div key={job.id} className="queue-item">
+                <div>
+                  <span className="queue-title">{job.buildingName}</span>
+                  <span className="queue-subtitle">{job.provinceName}</span>
+                </div>
+                <div className="queue-controls">
+                  <span>{job.daysRemaining}d</span>
+                  <button className="icon-btn" onClick={() => prototypeRef.current?.cancelConstruction(job.id)} title="Cancel construction">
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+            )) : <div className="empty-state compact">No construction queued</div>}
+          </div>
+        </div>
+
+        <div className="panel-section training-panel">
+          <div className="section-header">
+            <PencilRuler className="section-icon-svg" size={16} />
+            <span className="header-title">DIVISIONS</span>
+          </div>
+          <div className="building-summary">
+            <span>Training {hudState.training.activeTrainingCount}/{hudState.training.trainingSlots}</span>
+            <span>Equipment {playerEconomy ? Math.round(playerEconomy.equipmentPool) : 0}</span>
+          </div>
+          <select
+            className="deployment-select"
+            value={activeDeploymentProvinceId ?? ''}
+            onChange={(event) => setDeploymentProvinceId(Number(event.target.value))}
+          >
+            {hudState.training.validDeploymentProvinceIds.map((provinceId) => (
+              <option key={provinceId} value={provinceId}>
+                Province {provinceId}
+              </option>
+            ))}
+          </select>
+          <div className="template-list">
+            {hudState.training.templates.map((template) => (
+              <div key={template.id} className="template-card">
+                <div>
+                  <span className="queue-title">{template.name}</span>
+                  <span className="queue-subtitle">
+                    MP {template.stats.manpower} / EQ {template.stats.equipment} / SPD {Math.round(template.stats.speed)}
+                  </span>
+                </div>
+                <button className="management-btn small" onClick={() => queueTraining(template.id)}>
+                  <Plus size={14} />
+                  Train
+                </button>
+              </div>
+            ))}
+          </div>
+          <button className="designer-open-btn" onClick={() => setIsDesignerOpen(true)}>
+            <PencilRuler size={15} />
+            Open Division Designer
+          </button>
+          <div className="queue-list">
+            {hudState.training.jobs.length > 0 ? hudState.training.jobs.map((job) => (
+              <div key={job.id} className="queue-item">
+                <div>
+                  <span className="queue-title">{job.templateName}</span>
+                  <span className="queue-subtitle">{job.status === 'ready' ? 'Ready for deployment' : `${job.provinceName}`}</span>
+                </div>
+                <div className="queue-controls">
+                  <span>{job.status === 'ready' ? 'Ready' : `${job.daysRemaining}d`}</span>
+                  <button className="icon-btn" onClick={() => prototypeRef.current?.cancelTraining(job.id)} title="Cancel training">
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+            )) : <div className="empty-state compact">No divisions training</div>}
+          </div>
+        </div>
+
         {/* Selected Province */}
         <div className="panel-section">
           <div className="section-header">
@@ -233,6 +374,12 @@ function App() {
               <div className="detail-row">
                 <span className="detail-label">Units Present</span>
                 <span className="detail-value">{hudState.selectedProvince.unitCount}</span>
+              </div>
+              <div className="detail-row">
+                <span className="detail-label">Buildings</span>
+                <span className="detail-value">
+                  B {hudState.selectedProvince.buildings.barracks} / MC {hudState.selectedProvince.buildings.militaryComplex}
+                </span>
               </div>
             </div>
           ) : (
@@ -391,6 +538,10 @@ function App() {
       {hudState.activeCombats.map((combat) => (
         <BattlePopup key={combat.id} combat={combat} />
       ))}
+
+      {isDesignerOpen && (
+        <DivisionDesignerModal templates={hudState.training.templates} onClose={() => setIsDesignerOpen(false)} onSave={saveTemplate} />
+      )}
     </main>
   )
 }
@@ -420,10 +571,196 @@ function ResourceChip({ resourceId, value, income = 0, isLoading = false }: Reso
 }
 
 function ResourceIcon({ resourceId }: { resourceId: ResourceId }) {
+  const Icon = RESOURCE_META[resourceId].Icon
+
   return (
     <span className={`resource-icon ${resourceId}`} aria-hidden="true">
-      {RESOURCE_META[resourceId].icon}
+      <Icon size={15} strokeWidth={2.4} />
     </span>
+  )
+}
+
+interface DivisionDesignerModalProps {
+  templates: DivisionTemplate[]
+  onClose: () => void
+  onSave: (draft: { id?: string; name: string; nodes: DivisionNode[] }) => void
+}
+
+function DivisionDesignerModal({ templates, onClose, onSave }: DivisionDesignerModalProps) {
+  const [templateId, setTemplateId] = useState<string | undefined>(undefined)
+  const [name, setName] = useState('New Division')
+  const [nodes, setNodes] = useState<DivisionNode[]>([])
+  const stats = calculateDivisionStats(nodes)
+  const canSave = nodes.length > 0 && nodes.length <= MAX_BATTALIONS_PER_TEMPLATE
+
+  const loadTemplate = (template: DivisionTemplate) => {
+    setTemplateId(template.id)
+    setName(template.name)
+    setNodes(template.nodes.map((node) => ({ ...node, id: `${node.id}-edit-${Date.now()}` })))
+  }
+
+  const addNode = (battalionType: BattalionType, x: number, y: number) => {
+    if (nodes.length >= MAX_BATTALIONS_PER_TEMPLATE) {
+      return
+    }
+
+    setNodes((current) => [
+      ...current,
+      {
+        id: `node-${Date.now()}-${current.length}`,
+        battalionType,
+        x: Math.max(30, Math.min(560, x)),
+        y: Math.max(30, Math.min(300, y)),
+      },
+    ])
+  }
+
+  const handleCanvasDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    const canvas = event.currentTarget.getBoundingClientRect()
+    const battalionType = event.dataTransfer.getData('battalionType') as BattalionType
+    const nodeId = event.dataTransfer.getData('nodeId')
+
+    if (nodeId) {
+      setNodes((current) => current.map((node) => (
+        node.id === nodeId ? { ...node, x: event.clientX - canvas.left - 65, y: event.clientY - canvas.top - 24 } : node
+      )))
+      return
+    }
+
+    if (battalionType) {
+      addNode(battalionType, event.clientX - canvas.left - 65, event.clientY - canvas.top - 24)
+    }
+  }
+
+  const save = () => {
+    if (!canSave) {
+      return
+    }
+
+    onSave({ id: templateId, name, nodes })
+    onClose()
+  }
+
+  return (
+    <div className="designer-backdrop">
+      <div className="designer-modal">
+        <div className="designer-header">
+          <div>
+            <span className="designer-kicker">Division Designer</span>
+            <input className="designer-name-input" value={name} onChange={(event) => setName(event.target.value)} />
+          </div>
+          <div className="designer-header-actions">
+            <button className="management-btn" disabled={!canSave} onClick={save}>
+              <Save size={15} />
+              Save
+            </button>
+            <button className="icon-btn large" onClick={onClose} title="Close designer">
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        <div className="designer-body">
+          <aside className="battalion-palette">
+            <span className="designer-column-title">Battalions</span>
+            {(Object.keys(BATTALION_DEFINITIONS) as BattalionType[]).map((battalionType) => {
+              const battalion = BATTALION_DEFINITIONS[battalionType]
+
+              return (
+                <div
+                  key={battalionType}
+                  className="battalion-card"
+                  draggable
+                  onDragStart={(event) => event.dataTransfer.setData('battalionType', battalionType)}
+                >
+                  <span className="battalion-name">{battalion.name}</span>
+                  <span className="battalion-role">{battalion.role}</span>
+                </div>
+              )
+            })}
+
+            <span className="designer-column-title saved-title">Saved Templates</span>
+            {templates.map((template) => (
+              <button key={template.id} className="saved-template-btn" onClick={() => loadTemplate(template)}>
+                {template.name}
+              </button>
+            ))}
+          </aside>
+
+          <section
+            className="division-canvas"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={handleCanvasDrop}
+          >
+            <svg className="division-lines">
+              {nodes.slice(1).map((node, index) => {
+                const previous = nodes[index]
+                return (
+                  <line
+                    key={`${previous.id}-${node.id}`}
+                    x1={previous.x + 65}
+                    y1={previous.y + 24}
+                    x2={node.x + 65}
+                    y2={node.y + 24}
+                  />
+                )
+              })}
+            </svg>
+            {nodes.length === 0 && <div className="canvas-empty">Drag battalions here</div>}
+            {nodes.map((node, index) => {
+              const battalion = BATTALION_DEFINITIONS[node.battalionType]
+
+              return (
+                <div
+                  key={node.id}
+                  className="division-node"
+                  draggable
+                  style={{ left: node.x, top: node.y }}
+                  onDragStart={(event) => event.dataTransfer.setData('nodeId', node.id)}
+                >
+                  <span className="node-index">{index + 1}</span>
+                  <span className="node-title">{battalion.name}</span>
+                  <button className="node-remove" onClick={() => setNodes((current) => current.filter((candidate) => candidate.id !== node.id))}>
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              )
+            })}
+          </section>
+
+          <aside className="designer-stats">
+            <span className="designer-column-title">Template Stats</span>
+            <DesignerStat label="Manpower" value={stats.manpower} />
+            <DesignerStat label="Equipment" value={stats.equipment} />
+            <DesignerStat label="Training" value={`${stats.trainingDays}d`} />
+            <DesignerStat label="Speed" value={Math.round(stats.speed)} />
+            <DesignerStat label="Soft Attack" value={Math.round(stats.softAttack)} />
+            <DesignerStat label="Hard Attack" value={Math.round(stats.hardAttack)} />
+            <DesignerStat label="Defense" value={Math.round(stats.defense)} />
+            <DesignerStat label="Breakthrough" value={Math.round(stats.breakthrough)} />
+            <DesignerStat label="Armor" value={Math.round(stats.armor)} />
+            <DesignerStat label="Piercing" value={Math.round(stats.piercing)} />
+            <DesignerStat label="Reliability" value={`${Math.round(stats.reliability * 100)}%`} />
+            <DesignerStat label="Maneuver" value={Math.round(stats.maneuverability)} />
+            <DesignerStat label="Supply" value={stats.supplyUse.toFixed(1)} />
+            <DesignerStat label="Fuel" value={stats.fuelUse.toFixed(1)} />
+            <div className={`designer-validation ${canSave ? 'valid' : 'invalid'}`}>
+              {canSave ? `${nodes.length}/${MAX_BATTALIONS_PER_TEMPLATE} battalions` : 'Add 1-6 battalions'}
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DesignerStat({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div className="designer-stat-row">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
   )
 }
 

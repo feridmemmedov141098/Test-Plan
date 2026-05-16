@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { createEmptyProvinceBuildings } from '../game/economy/ConstructionTypes'
 import { getProvinceMetadata } from '../game/province/provinceMetadata'
 import {
   COUNTRY_COLORS,
@@ -101,6 +102,7 @@ export class ProvinceMapRenderer {
           bounds: provinceBounds,
           neighbors: [],
           units: [],
+          buildings: createEmptyProvinceBuildings(),
         }
       })
 

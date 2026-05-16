@@ -1,10 +1,24 @@
 import * as THREE from 'three'
 import { CombatSystem, type CombatInstance } from '../game/combat/CombatSystem'
+import {
+  BUILDING_DEFINITIONS,
+  MAX_ACTIVE_CONSTRUCTION_JOBS,
+  type BuildingType,
+  type ConstructionJob,
+} from '../game/economy/ConstructionTypes'
 import { EconomySystem, type EconomyState } from '../game/economy/EconomySystem'
 import { ProvincePathfindingSystem } from '../game/movement/ProvincePathfindingSystem'
 import { ProvinceState } from '../game/province/ProvinceState'
 import { COUNTRY_COLORS, COUNTRY_NAMES, type CountryId, type Province } from '../game/province/provinceTypes'
 import type { ResourceYields } from '../game/province/provinceTypes'
+import {
+  calculateDivisionStats,
+  createStarterDivisionTemplates,
+  MAX_BATTALIONS_PER_TEMPLATE,
+  type DivisionNode,
+  type DivisionTemplate,
+  type TrainingJob,
+} from '../game/units/DivisionDesignerTypes'
 import type { UnitState } from '../game/units/UnitTypes'
 import { ProvinceMapRenderer } from './ProvinceMapRenderer'
 import { UnitModelFactory } from './UnitModelFactory'
@@ -15,10 +29,15 @@ export interface PrototypeHudState {
   isLoading: boolean
   status: string
   selectedProvince: {
+    id: number
     name: string
     ownerName: string
     controllerName: string
     unitCount: number
+    buildings: {
+      barracks: number
+      militaryComplex: number
+    }
     economyRegion: string
     primaryResource: string
     resourceYields: ResourceYields
@@ -40,6 +59,21 @@ export interface PrototypeHudState {
     reinforcementDelayHours: number
   } | null
   economy: EconomyState | null
+  construction: {
+    jobs: ConstructionJob[]
+    playerBuildings: {
+      barracks: number
+      militaryComplex: number
+    }
+    validConstructionProvinceIds: number[]
+  }
+  training: {
+    jobs: TrainingJob[]
+    templates: DivisionTemplate[]
+    validDeploymentProvinceIds: number[]
+    trainingSlots: number
+    activeTrainingCount: number
+  }
   activeCombat: CombatInstance | null
   activeCombats: ActiveCombatOverlay[]
   time: {
@@ -86,6 +120,9 @@ type HudCallback = (state: PrototypeHudState) => void
 const BASE_CAMERA_HEIGHT = 190
 const UNIT_Y = 2.2
 const SIM_HOURS_PER_SECOND = 6
+const PLAYER_COUNTRY_ID: CountryId = 'azerbaijan'
+const MILITARY_COMPLEX_DAILY_EQUIPMENT = 25
+const TRAINING_REFUND_MULTIPLIER = 0.5
 
 export class StrategyPrototype {
   private readonly container: HTMLDivElement
@@ -100,6 +137,7 @@ export class StrategyPrototype {
   private readonly unitFactory = new UnitModelFactory()
   private readonly economySystem = new EconomySystem()
   private readonly combatSystem = new CombatSystem()
+  private readonly divisionTemplates = new Map<string, DivisionTemplate>()
   private readonly units: UnitState[] = []
   private readonly unitGroups = new Map<string, THREE.Group>()
   private readonly unitHitMeshes: THREE.Object3D[] = []
@@ -134,6 +172,10 @@ export class StrategyPrototype {
   private hudStatus = 'Loading province map'
   private hudUpdateTimer = 0
   private isDisposed = false
+  private nextConstructionJobId = 1
+  private nextTrainingJobId = 1
+  private nextUnitSerial = 1
+  private nextTemplateSerial = 1
   private readonly HUD_UPDATE_INTERVAL = 0.15
 
   constructor(container: HTMLDivElement, setHudState: HudCallback) {
@@ -152,6 +194,18 @@ export class StrategyPrototype {
         selectedProvince: null,
         selectedUnit: null,
         economy: null,
+        construction: {
+          jobs: [],
+          playerBuildings: { barracks: 0, militaryComplex: 0 },
+          validConstructionProvinceIds: [],
+        },
+        training: {
+          jobs: [],
+          templates: [],
+          validDeploymentProvinceIds: [],
+          trainingSlots: 0,
+          activeTrainingCount: 0,
+        },
         activeCombat: null,
         activeCombats: [],
         time: { day: 1, hour: 0, speed: 1 },
@@ -178,6 +232,8 @@ export class StrategyPrototype {
         return
       }
 
+      this.initializeDivisionTemplates()
+      this.initializeStartingBuildings()
       this.createSelectionMeshes()
       this.createUnits()
       this.economySystem.tickDaily(this.provinceState.provinces)
@@ -195,6 +251,18 @@ export class StrategyPrototype {
         selectedProvince: null,
         selectedUnit: null,
         economy: null,
+        construction: {
+          jobs: [],
+          playerBuildings: { barracks: 0, militaryComplex: 0 },
+          validConstructionProvinceIds: [],
+        },
+        training: {
+          jobs: [],
+          templates: [],
+          validDeploymentProvinceIds: [],
+          trainingSlots: 0,
+          activeTrainingCount: 0,
+        },
         activeCombat: null,
         activeCombats: [],
         time: { day: this.currentDay, hour: this.currentHour, speed: this.timeSpeed },
@@ -302,6 +370,28 @@ export class StrategyPrototype {
     spawnArmenia.forEach((province, index) => this.createUnit(`am-${index + 1}`, `AM Division ${index + 1}`, 'armenia', province))
   }
 
+  private initializeDivisionTemplates(): void {
+    for (const template of createStarterDivisionTemplates()) {
+      this.divisionTemplates.set(template.id, template)
+    }
+  }
+
+  private initializeStartingBuildings(): void {
+    if (!this.provinceState) {
+      return
+    }
+
+    const bestProvince = [...this.provinceState.getByCountry(PLAYER_COUNTRY_ID)]
+      .sort((left, right) => right.resourceYields.industry - left.resourceYields.industry || right.resourceYields.manpower - left.resourceYields.manpower)[0]
+
+    if (!bestProvince) {
+      return
+    }
+
+    bestProvince.buildings.barracks = 1
+    bestProvince.buildings.militaryComplex = 1
+  }
+
   private createUnit(id: string, name: string, countryId: CountryId, province: Province): void {
     const unit: UnitState = {
       id,
@@ -340,6 +430,146 @@ export class StrategyPrototype {
     this.units.push(unit)
     this.unitGroups.set(id, group)
     this.scene.add(group)
+  }
+
+  queueConstruction(provinceId: number, buildingType: BuildingType): void {
+    if (this.isDisposed || !this.provinceState) {
+      return
+    }
+
+    const province = this.provinceState.getProvince(provinceId)
+    const economy = this.economySystem.countries[PLAYER_COUNTRY_ID]
+    const definition = BUILDING_DEFINITIONS[buildingType]
+
+    if (!this.isPlayerControlledProvince(province) || province.isContested) {
+      this.updateHud('Construction requires controlled, stable province')
+      return
+    }
+
+    if (economy.constructionQueue.length >= MAX_ACTIVE_CONSTRUCTION_JOBS) {
+      this.updateHud('Construction queue is full')
+      return
+    }
+
+    if (this.getProjectedBuildingCount(province, buildingType) >= definition.maxPerProvince) {
+      this.updateHud(`${definition.name} limit reached here`)
+      return
+    }
+
+    if (!this.economySystem.spendResources(PLAYER_COUNTRY_ID, definition.cost)) {
+      this.updateHud('Not enough resources')
+      return
+    }
+
+    economy.constructionQueue.push({
+      id: `build-${this.nextConstructionJobId++}`,
+      countryId: PLAYER_COUNTRY_ID,
+      provinceId,
+      provinceName: province.displayName,
+      buildingType,
+      buildingName: definition.name,
+      cost: { ...definition.cost },
+      totalDays: definition.buildDays,
+      daysRemaining: definition.buildDays,
+    })
+    this.updateHud(`${definition.name} queued`)
+  }
+
+  cancelConstruction(jobId: string): void {
+    const economy = this.economySystem.countries[PLAYER_COUNTRY_ID]
+    const job = economy.constructionQueue.find((candidate) => candidate.id === jobId)
+
+    if (!job) {
+      return
+    }
+
+    economy.constructionQueue = economy.constructionQueue.filter((candidate) => candidate.id !== jobId)
+    this.economySystem.refundResources(PLAYER_COUNTRY_ID, job.cost, TRAINING_REFUND_MULTIPLIER)
+    this.updateHud('Construction cancelled')
+  }
+
+  queueDivisionTraining(templateId: string, provinceId: number): void {
+    if (this.isDisposed || !this.provinceState) {
+      return
+    }
+
+    const template = this.divisionTemplates.get(templateId)
+    const province = this.provinceState.getProvince(provinceId)
+    const economy = this.economySystem.countries[PLAYER_COUNTRY_ID]
+    const activeTrainingCount = economy.trainingQueue.filter((job) => job.status === 'training').length
+
+    if (!template || template.nodes.length === 0) {
+      this.updateHud('Select a valid division template')
+      return
+    }
+
+    if (activeTrainingCount >= this.getPlayerBuildingCounts().barracks) {
+      this.updateHud('No free barracks training slot')
+      return
+    }
+
+    if (!this.isValidDeploymentProvince(province)) {
+      this.updateHud('Deployment requires controlled barracks')
+      return
+    }
+
+    const resourceCost = { ...template.stats.resourceCost, manpower: template.stats.manpower }
+
+    if (!this.economySystem.canAfford(PLAYER_COUNTRY_ID, resourceCost) || economy.equipmentPool < template.stats.equipment) {
+      this.updateHud('Not enough manpower, equipment, or resources')
+      return
+    }
+
+    this.economySystem.spendResources(PLAYER_COUNTRY_ID, resourceCost)
+    economy.equipmentPool -= template.stats.equipment
+    economy.trainingQueue.push({
+      id: `train-${this.nextTrainingJobId++}`,
+      countryId: PLAYER_COUNTRY_ID,
+      provinceId,
+      provinceName: province.displayName,
+      templateId,
+      templateName: template.name,
+      stats: template.stats,
+      totalDays: template.stats.trainingDays,
+      daysRemaining: template.stats.trainingDays,
+      status: 'training',
+    })
+    this.updateHud(`${template.name} training`)
+  }
+
+  cancelTraining(jobId: string): void {
+    const economy = this.economySystem.countries[PLAYER_COUNTRY_ID]
+    const job = economy.trainingQueue.find((candidate) => candidate.id === jobId)
+
+    if (!job) {
+      return
+    }
+
+    economy.trainingQueue = economy.trainingQueue.filter((candidate) => candidate.id !== jobId)
+    this.economySystem.refundResources(PLAYER_COUNTRY_ID, { ...job.stats.resourceCost, manpower: job.stats.manpower }, TRAINING_REFUND_MULTIPLIER)
+    economy.equipmentPool += job.stats.equipment * TRAINING_REFUND_MULTIPLIER
+    this.updateHud('Training cancelled')
+  }
+
+  saveDivisionTemplate(draft: { id?: string; name: string; nodes: DivisionNode[] }): void {
+    const nodes = draft.nodes.slice(0, MAX_BATTALIONS_PER_TEMPLATE)
+
+    if (nodes.length === 0) {
+      this.updateHud('Template needs a battalion')
+      return
+    }
+
+    const id = draft.id && this.divisionTemplates.has(draft.id) ? draft.id : `template-custom-${this.nextTemplateSerial++}`
+    const name = draft.name.trim() || 'New Division'
+    const template: DivisionTemplate = {
+      id,
+      name,
+      nodes,
+      stats: calculateDivisionStats(nodes),
+    }
+
+    this.divisionTemplates.set(id, template)
+    this.updateHud(`${name} template saved`)
   }
 
   private addEventListeners(): void {
@@ -780,6 +1010,7 @@ export class StrategyPrototype {
         this.currentHour = 0
         this.currentDay += 1
         this.economySystem.tickDaily(this.provinceState.provinces)
+        this.updatePlayerProductionAndQueues()
       }
     }
 
@@ -900,6 +1131,139 @@ export class StrategyPrototype {
     }
   }
 
+  private updatePlayerProductionAndQueues(): void {
+    if (!this.provinceState) {
+      return
+    }
+
+    const economy = this.economySystem.countries[PLAYER_COUNTRY_ID]
+    const buildings = this.getPlayerBuildingCounts()
+    this.economySystem.addEquipment(PLAYER_COUNTRY_ID, buildings.militaryComplex * MILITARY_COMPLEX_DAILY_EQUIPMENT)
+
+    for (const job of [...economy.constructionQueue]) {
+      job.daysRemaining = Math.max(0, job.daysRemaining - 1)
+
+      if (job.daysRemaining > 0) {
+        continue
+      }
+
+      const province = this.provinceState.getProvince(job.provinceId)
+
+      if (this.isPlayerControlledProvince(province)) {
+        province.buildings[job.buildingType] += 1
+        economy.constructionQueue = economy.constructionQueue.filter((candidate) => candidate.id !== job.id)
+      }
+    }
+
+    for (const job of economy.trainingQueue) {
+      if (job.status === 'training') {
+        job.daysRemaining = Math.max(0, job.daysRemaining - 1)
+
+        if (job.daysRemaining === 0) {
+          job.status = 'ready'
+        }
+      }
+    }
+
+    for (const job of [...economy.trainingQueue].filter((candidate) => candidate.status === 'ready')) {
+      const preferredProvince = this.provinceState.getProvince(job.provinceId)
+      const deploymentProvince = this.isValidDeploymentProvince(preferredProvince) ? preferredProvince : this.getValidDeploymentProvinces()[0]
+
+      if (!deploymentProvince) {
+        continue
+      }
+
+      this.deployTrainingJob(job, deploymentProvince)
+      economy.trainingQueue = economy.trainingQueue.filter((candidate) => candidate.id !== job.id)
+    }
+  }
+
+  private deployTrainingJob(job: TrainingJob, province: Province): void {
+    const id = `az-trained-${this.nextUnitSerial++}`
+    const unit: UnitState = {
+      id,
+      name: job.templateName,
+      countryId: PLAYER_COUNTRY_ID,
+      owner: COUNTRY_NAMES[PLAYER_COUNTRY_ID],
+      provinceId: province.id,
+      position: province.centerWorld.clone().setY(UNIT_Y),
+      route: [],
+      routeProvinceIds: [],
+      routeIndex: 0,
+      speed: job.stats.speed,
+      manpower: job.stats.manpower,
+      maxManpower: job.stats.manpower,
+      organization: job.stats.organization,
+      maxOrganization: job.stats.organization,
+      equipment: job.stats.equipment,
+      maxEquipment: job.stats.equipment,
+      attack: Math.round(job.stats.attack),
+      defense: Math.round(job.stats.defense),
+      reliability: job.stats.reliability,
+      experience: 0,
+      status: 'idle',
+      reinforcementDelayHours: 0,
+    }
+    const group = this.unitFactory.create(COUNTRY_COLORS[PLAYER_COUNTRY_ID])
+    group.position.copy(unit.position)
+    group.userData.unitId = id
+    group.traverse((object) => {
+      if (object instanceof THREE.Mesh) {
+        object.userData.unitId = id
+        this.unitHitMeshes.push(object)
+      }
+    })
+    province.units.push(id)
+    this.units.push(unit)
+    this.unitGroups.set(id, group)
+    this.scene.add(group)
+    this.updateHud(`${job.templateName} deployed`)
+  }
+
+  private getPlayerBuildingCounts(): { barracks: number; militaryComplex: number } {
+    if (!this.provinceState) {
+      return { barracks: 0, militaryComplex: 0 }
+    }
+
+    return this.provinceState.provinces
+      .filter((province) => this.isPlayerControlledProvince(province))
+      .reduce(
+        (counts, province) => ({
+          barracks: counts.barracks + province.buildings.barracks,
+          militaryComplex: counts.militaryComplex + province.buildings.militaryComplex,
+        }),
+        { barracks: 0, militaryComplex: 0 },
+      )
+  }
+
+  private getValidConstructionProvinces(): Province[] {
+    if (!this.provinceState) {
+      return []
+    }
+
+    return this.provinceState.provinces.filter((province) => this.isPlayerControlledProvince(province) && !province.isContested)
+  }
+
+  private getValidDeploymentProvinces(): Province[] {
+    return this.getValidConstructionProvinces().filter((province) => province.buildings.barracks > 0)
+  }
+
+  private isValidDeploymentProvince(province: Province): boolean {
+    return this.isPlayerControlledProvince(province) && !province.isContested && province.buildings.barracks > 0
+  }
+
+  private isPlayerControlledProvince(province: Province): boolean {
+    return province.controllerCountryId === PLAYER_COUNTRY_ID
+  }
+
+  private getProjectedBuildingCount(province: Province, buildingType: BuildingType): number {
+    const queued = this.economySystem.countries[PLAYER_COUNTRY_ID].constructionQueue.filter(
+      (job) => job.provinceId === province.id && job.buildingType === buildingType,
+    ).length
+
+    return province.buildings[buildingType] + queued
+  }
+
   private updateSelectionVisuals(): void {
     const selectedUnit = this.units.find((unit) => unit.id === this.selectedUnitId)
 
@@ -960,6 +1324,8 @@ export class StrategyPrototype {
     const selectedProvince = this.selectedProvinceId === null ? null : this.provinceState.getProvince(this.selectedProvinceId)
     const selectedUnit = this.units.find((unit) => unit.id === this.selectedUnitId) ?? null
     const counts = this.provinceState.getCounts()
+    const playerBuildings = this.getPlayerBuildingCounts()
+    const playerEconomy = this.economySystem.countries[PLAYER_COUNTRY_ID]
     const activeCombat = selectedProvince
       ? this.combatSystem.getActiveCombatForProvince(selectedProvince.id)
       : selectedUnit
@@ -973,10 +1339,12 @@ export class StrategyPrototype {
       status,
       selectedProvince: selectedProvince
         ? {
+            id: selectedProvince.id,
             name: `${selectedProvince.displayName} (${selectedProvince.name})`,
             ownerName: COUNTRY_NAMES[selectedProvince.ownerCountryId],
             controllerName: COUNTRY_NAMES[selectedProvince.controllerCountryId],
             unitCount: selectedProvince.units.length,
+            buildings: selectedProvince.buildings,
             economyRegion: selectedProvince.economyRegion,
             primaryResource: selectedProvince.primaryResource,
             resourceYields: selectedProvince.resourceYields,
@@ -1001,6 +1369,18 @@ export class StrategyPrototype {
           }
         : null,
       economy: this.economySystem.countries,
+      construction: {
+        jobs: playerEconomy.constructionQueue,
+        playerBuildings,
+        validConstructionProvinceIds: this.getValidConstructionProvinces().map((province) => province.id),
+      },
+      training: {
+        jobs: playerEconomy.trainingQueue,
+        templates: [...this.divisionTemplates.values()],
+        validDeploymentProvinceIds: this.getValidDeploymentProvinces().map((province) => province.id),
+        trainingSlots: playerBuildings.barracks,
+        activeTrainingCount: playerEconomy.trainingQueue.filter((job) => job.status === 'training').length,
+      },
       activeCombat,
       activeCombats,
       time: {

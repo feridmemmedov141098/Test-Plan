@@ -1,11 +1,15 @@
 import type { CountryId, Province, ResourceId, ResourceYields } from '../province/provinceTypes'
 import { createEmptyYields, RESOURCE_IDS } from '../province/provinceMetadata'
+import type { ConstructionJob } from './ConstructionTypes'
+import type { TrainingJob } from '../units/DivisionDesignerTypes'
 
 export interface CountryEconomy {
   stockpiles: ResourceYields
   dailyIncome: ResourceYields
   manpowerPool: number
   equipmentPool: number
+  constructionQueue: ConstructionJob[]
+  trainingQueue: TrainingJob[]
 }
 
 export type EconomyState = Record<CountryId, CountryEconomy>
@@ -40,6 +44,37 @@ export class EconomySystem {
     }
   }
 
+  addEquipment(countryId: CountryId, amount: number): void {
+    this.countries[countryId].equipmentPool += amount
+  }
+
+  canAfford(countryId: CountryId, cost: ResourceYields): boolean {
+    const country = this.countries[countryId]
+    return RESOURCE_IDS.every((resourceId) => country.stockpiles[resourceId] >= cost[resourceId])
+  }
+
+  spendResources(countryId: CountryId, cost: ResourceYields): boolean {
+    if (!this.canAfford(countryId, cost)) {
+      return false
+    }
+
+    for (const resourceId of RESOURCE_IDS) {
+      this.spend(countryId, resourceId, cost[resourceId])
+    }
+
+    return true
+  }
+
+  refundResources(countryId: CountryId, cost: ResourceYields, multiplier = 1): void {
+    const country = this.countries[countryId]
+
+    for (const resourceId of RESOURCE_IDS) {
+      country.stockpiles[resourceId] += cost[resourceId] * multiplier
+    }
+
+    country.manpowerPool = country.stockpiles.manpower
+  }
+
   spendManpower(countryId: CountryId, amount: number): number {
     return this.spend(countryId, 'manpower', amount)
   }
@@ -72,10 +107,12 @@ function createCountryEconomy(startingManpower: number, startingIndustry: number
   stockpiles.manpower = startingManpower
   stockpiles.industry = startingIndustry
 
-  return {
+    return {
     stockpiles,
     dailyIncome: createEmptyYields(),
     manpowerPool: startingManpower,
     equipmentPool: startingIndustry * 5,
+    constructionQueue: [],
+    trainingQueue: [],
   }
 }

@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import type { ProvinceBuildings } from '../economy/ConstructionTypes'
 
 export const PROVINCE_MAP_URL = '/data/maps/Map.glb'
 export const UNIT_MODEL_URL = '/data/maps/Unit_A.glb'
@@ -31,6 +32,7 @@ export interface Province {
   bounds: THREE.Box3
   neighbors: number[]
   units: string[]
+  buildings: ProvinceBuildings
 }
 
 export const COUNTRY_NAMES: Record<CountryId, string> = {
