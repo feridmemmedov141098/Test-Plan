@@ -92,6 +92,7 @@ export class ProvinceMapRenderer {
           economyRegion: metadata.economyRegion,
           primaryResource: metadata.primaryResource,
           resourceYields: metadata.resourceYields,
+          terrainType: metadata.terrainType,
           countryId,
           ownerCountryId: countryId,
           controllerCountryId: countryId,

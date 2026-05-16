@@ -1,4 +1,4 @@
-import type { CountryId, ProvinceMetadata, ResourceId, ResourceYields } from './provinceTypes'
+import type { CountryId, ProvinceMetadata, ResourceId, ResourceYields, TerrainType } from './provinceTypes'
 
 export const RESOURCE_IDS: ResourceId[] = ['oil', 'gas', 'metal', 'food', 'industry', 'energy', 'manpower']
 
@@ -165,6 +165,97 @@ const FUEL_PAIR: Partial<Record<ResourceId, ResourceId>> = {
   gas: 'oil',
 }
 
+const TERRAIN_BY_PROVINCE: Partial<Record<string, TerrainType>> = {
+  AZBA: 'urban',
+  AZGA: 'urban',
+  AZSM: 'urban',
+  AZMI: 'urban',
+  AZLA: 'urban',
+  AZNX: 'urban',
+  AZSR: 'urban',
+  AMER: 'urban',
+  AZABS: 'suburban',
+  AZYEV: 'suburban',
+  AZYE: 'suburban',
+  AZNA: 'suburban',
+  AZXAC: 'suburban',
+  AMKT: 'suburban',
+  AZHAC: 'desert',
+  AZQOB: 'desert',
+  AZSIY: 'desert',
+  AZSBN: 'desert',
+  AZNEF: 'desert',
+  AZSAL: 'desert',
+  AZBAB: 'desert',
+  AZKAN: 'desert',
+  AZSAD: 'desert',
+  AZSAR: 'desert',
+  AMAR: 'desert',
+  AMAV: 'desert',
+  AZAGC: 'fields',
+  AZAGS: 'fields',
+  AZAGU: 'fields',
+  AZBAR: 'fields',
+  AZBEY: 'fields',
+  AZBIL: 'fields',
+  AZFUZ: 'fields',
+  AZGOY: 'fields',
+  AZIMI: 'fields',
+  AZKUR: 'fields',
+  AZSAB: 'fields',
+  AZSAT: 'fields',
+  AZUCA: 'fields',
+  AZZAR: 'fields',
+  AMAG: 'fields',
+  AMSH: 'fields',
+  AZAGA: 'plains',
+  AZGOR: 'plains',
+  AZGYG: 'plains',
+  AZQAZ: 'plains',
+  AZSKR: 'plains',
+  AZSMX: 'plains',
+  AZTOV: 'plains',
+  AZTAR: 'plains',
+  AZAGM: 'plains',
+  AZCAB: 'plains',
+  AZAST: 'forest',
+  AZCAL: 'forest',
+  AZLAN: 'forest',
+  AZLER: 'forest',
+  AZMAS: 'forest',
+  AZYAR: 'forest',
+  AZBAL: 'forest',
+  AZOGU: 'forest',
+  AZQAX: 'forest',
+  AZQBA: 'forest',
+  AZQUS: 'forest',
+  AZSA: 'forest',
+  AZSAK: 'forest',
+  AZZAQ: 'forest',
+  AZISM: 'forest',
+  AZQAB: 'forest',
+  AZSMI: 'forest',
+  AMLO: 'forest',
+  AMTV: 'forest',
+  AZDAS: 'hills',
+  AZGAD: 'hills',
+  AZQBI: 'hills',
+  AZXIZ: 'hills',
+  AZXCI: 'hills',
+  AZXVD: 'hills',
+  AZXA: 'hills',
+  AMGR: 'hills',
+  AZKAL: 'mountain',
+  AZLAC: 'mountain',
+  AZZAN: 'mountain',
+  AZCUL: 'mountain',
+  AZORD: 'mountain',
+  AZSAH: 'mountain',
+  AZSUS: 'mountain',
+  AMSU: 'mountain',
+  AMVD: 'mountain',
+}
+
 export function createEmptyYields(): ResourceYields {
   return {
     oil: 0,
@@ -184,6 +275,7 @@ export function getProvinceMetadata(provinceCode: string, countryId: CountryId):
       economyRegion: 'Armenia Placeholder',
       primaryResource: 'food',
       resourceYields: { ...createEmptyYields(), food: 3, metal: 1, manpower: 1 },
+      terrainType: getTerrainType(provinceCode, countryId),
     }
   }
 
@@ -217,7 +309,12 @@ export function getProvinceMetadata(provinceCode: string, countryId: CountryId):
     economyRegion,
     primaryResource,
     resourceYields,
+    terrainType: getTerrainType(provinceCode, countryId),
   }
+}
+
+function getTerrainType(provinceCode: string, countryId: CountryId): TerrainType {
+  return TERRAIN_BY_PROVINCE[provinceCode] ?? (countryId === 'armenia' ? 'mountain' : 'fields')
 }
 
 function getPrimaryResource(provinceCode: string): ResourceId {

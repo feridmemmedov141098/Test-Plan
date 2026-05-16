@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import type { CountryId } from '../province/provinceTypes'
+import type { TerrainModifierSet } from './DivisionDesignerTypes'
 
 export type UnitStatus = 'idle' | 'moving' | 'inCombat' | 'retreating' | 'reinforcing'
 
@@ -23,6 +24,7 @@ export interface UnitState {
   attack: number
   defense: number
   reliability: number
+  terrainProfile: TerrainModifierSet
   experience: number
   status: UnitStatus
   reinforcementDelayHours: number

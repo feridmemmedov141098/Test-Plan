@@ -1,6 +1,7 @@
-import type { CountryId, ResourceYields } from '../province/provinceTypes'
+import type { CountryId, ResourceYields, TerrainType } from '../province/provinceTypes'
 
 export type BattalionType = 'infantry' | 'motorized' | 'mechanized' | 'tank' | 'antiTank' | 'artillery'
+export type TerrainModifierSet = Record<TerrainType, { attack: number; defense: number; speed: number }>
 
 export interface BattalionDefinition {
   id: BattalionType
@@ -22,6 +23,7 @@ export interface BattalionDefinition {
   maneuverability: number
   supplyUse: number
   fuelUse: number
+  terrainModifiers: TerrainModifierSet
 }
 
 export interface DivisionNode {
@@ -49,6 +51,7 @@ export interface DivisionStats {
   maneuverability: number
   supplyUse: number
   fuelUse: number
+  terrainProfile: TerrainModifierSet
 }
 
 export interface DivisionTemplate {
@@ -74,6 +77,9 @@ export interface TrainingJob {
 }
 
 export const MAX_BATTALIONS_PER_TEMPLATE = 6
+export const TERRAIN_TYPES: TerrainType[] = ['urban', 'suburban', 'plains', 'fields', 'forest', 'hills', 'mountain', 'desert']
+
+export const NEUTRAL_TERRAIN_PROFILE = createTerrainModifiers()
 
 export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> = {
   infantry: {
@@ -96,6 +102,13 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
     maneuverability: 42,
     supplyUse: 1,
     fuelUse: 0,
+    terrainModifiers: createTerrainModifiers({
+      urban: { attack: 1.08, defense: 1.16, speed: 0.9 },
+      forest: { attack: 1.05, defense: 1.12, speed: 0.92 },
+      hills: { attack: 1.02, defense: 1.1, speed: 0.88 },
+      desert: { speed: 0.85 },
+      mountain: { attack: 0.9, defense: 1.04, speed: 0.78 },
+    }),
   },
   motorized: {
     id: 'motorized',
@@ -117,6 +130,14 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
     maneuverability: 65,
     supplyUse: 1.4,
     fuelUse: 1.2,
+    terrainModifiers: createTerrainModifiers({
+      plains: { attack: 1.05, defense: 1.0, speed: 1.12 },
+      fields: { attack: 1.04, defense: 1.0, speed: 1.08 },
+      desert: { attack: 1.02, defense: 0.95, speed: 1.08 },
+      forest: { attack: 0.86, defense: 0.92, speed: 0.72 },
+      urban: { attack: 0.88, defense: 0.92, speed: 0.68 },
+      mountain: { attack: 0.72, defense: 0.8, speed: 0.55 },
+    }),
   },
   mechanized: {
     id: 'mechanized',
@@ -138,6 +159,14 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
     maneuverability: 56,
     supplyUse: 1.8,
     fuelUse: 1.7,
+    terrainModifiers: createTerrainModifiers({
+      plains: { attack: 1.06, defense: 1.02, speed: 1.05 },
+      suburban: { attack: 1.05, defense: 1.05, speed: 0.95 },
+      fields: { attack: 1.03, defense: 1.02, speed: 1.0 },
+      urban: { attack: 0.96, defense: 1.03, speed: 0.76 },
+      forest: { attack: 0.82, defense: 0.92, speed: 0.68 },
+      mountain: { attack: 0.68, defense: 0.78, speed: 0.48 },
+    }),
   },
   tank: {
     id: 'tank',
@@ -159,6 +188,15 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
     maneuverability: 48,
     supplyUse: 2.4,
     fuelUse: 2.6,
+    terrainModifiers: createTerrainModifiers({
+      plains: { attack: 1.15, defense: 1.02, speed: 1.06 },
+      fields: { attack: 1.12, defense: 1.0, speed: 1.02 },
+      suburban: { attack: 1.02, defense: 0.95, speed: 0.86 },
+      desert: { attack: 1.02, defense: 0.92, speed: 0.9 },
+      urban: { attack: 0.72, defense: 0.78, speed: 0.55 },
+      forest: { attack: 0.68, defense: 0.78, speed: 0.52 },
+      mountain: { attack: 0.45, defense: 0.58, speed: 0.35 },
+    }),
   },
   antiTank: {
     id: 'antiTank',
@@ -180,6 +218,13 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
     maneuverability: 36,
     supplyUse: 1.2,
     fuelUse: 0,
+    terrainModifiers: createTerrainModifiers({
+      urban: { attack: 1.02, defense: 1.18, speed: 0.88 },
+      forest: { attack: 1.0, defense: 1.14, speed: 0.86 },
+      hills: { attack: 1.0, defense: 1.16, speed: 0.82 },
+      mountain: { attack: 0.95, defense: 1.12, speed: 0.72 },
+      plains: { attack: 0.9, defense: 1.0, speed: 0.95 },
+    }),
   },
   artillery: {
     id: 'artillery',
@@ -201,6 +246,14 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
     maneuverability: 28,
     supplyUse: 1.8,
     fuelUse: 0,
+    terrainModifiers: createTerrainModifiers({
+      plains: { attack: 1.12, defense: 0.92, speed: 0.9 },
+      urban: { attack: 1.08, defense: 0.95, speed: 0.72 },
+      fields: { attack: 1.06, defense: 0.92, speed: 0.88 },
+      mountain: { attack: 0.72, defense: 0.86, speed: 0.5 },
+      forest: { attack: 0.78, defense: 0.88, speed: 0.58 },
+      desert: { attack: 0.86, defense: 0.84, speed: 0.65 },
+    }),
   },
 }
 
@@ -231,6 +284,7 @@ export function calculateDivisionStats(nodes: DivisionNode[]): DivisionStats {
       maneuverability: 0,
       supplyUse: 0,
       fuelUse: 0,
+      terrainProfile: NEUTRAL_TERRAIN_PROFILE,
     }
   }
 
@@ -266,7 +320,35 @@ export function calculateDivisionStats(nodes: DivisionNode[]): DivisionStats {
     maneuverability: Math.max(5, avgManeuver - supplyUse * 1.8 - fuelUse * 1.2),
     supplyUse,
     fuelUse,
+    terrainProfile: calculateTerrainProfile(battalions),
   }
+}
+
+export function createTerrainModifiers(overrides: Partial<Record<TerrainType, Partial<{ attack: number; defense: number; speed: number }>>> = {}): TerrainModifierSet {
+  return TERRAIN_TYPES.reduce((profile, terrainType) => {
+    const override = overrides[terrainType] ?? {}
+    profile[terrainType] = {
+      attack: override.attack ?? 1,
+      defense: override.defense ?? 1,
+      speed: override.speed ?? 1,
+    }
+    return profile
+  }, {} as TerrainModifierSet)
+}
+
+function calculateTerrainProfile(battalions: BattalionDefinition[]): TerrainModifierSet {
+  return TERRAIN_TYPES.reduce((profile, terrainType) => {
+    const attackWeight = battalions.reduce((sum, battalion) => sum + battalion.softAttack + battalion.hardAttack, 0)
+    const defenseWeight = battalions.reduce((sum, battalion) => sum + battalion.defense, 0)
+
+    profile[terrainType] = {
+      attack: battalions.reduce((sum, battalion) => sum + battalion.terrainModifiers[terrainType].attack * (battalion.softAttack + battalion.hardAttack), 0) / Math.max(1, attackWeight),
+      defense: battalions.reduce((sum, battalion) => sum + battalion.terrainModifiers[terrainType].defense * battalion.defense, 0) / Math.max(1, defenseWeight),
+      speed: Math.min(...battalions.map((battalion) => battalion.terrainModifiers[terrainType].speed)),
+    }
+
+    return profile
+  }, {} as TerrainModifierSet)
 }
 
 export function createStarterDivisionTemplates(): DivisionTemplate[] {

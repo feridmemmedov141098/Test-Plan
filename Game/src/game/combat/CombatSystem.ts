@@ -67,8 +67,8 @@ export class CombatSystem {
       }
 
       combat.elapsedHours += 1
-      this.applyCombatRound(sides.attacker, sides.defender)
-      this.applyCombatRound(sides.defender, sides.attacker)
+      this.applyCombatRound(sides.attacker, sides.defender, province)
+      this.applyCombatRound(sides.defender, sides.attacker, province)
 
       const attackerDefeated = isSideDefeated(sides.attacker)
       const defenderDefeated = isSideDefeated(sides.defender)
@@ -124,9 +124,9 @@ export class CombatSystem {
     }
   }
 
-  private applyCombatRound(attackers: UnitState[], defenders: UnitState[]): void {
-    const attackPower = getSideAttack(attackers)
-    const defensePower = getSideDefense(defenders)
+  private applyCombatRound(attackers: UnitState[], defenders: UnitState[], province: Province): void {
+    const attackPower = getSideAttack(attackers, province)
+    const defensePower = getSideDefense(defenders, province)
     const damage = Math.max(1, attackPower - defensePower * 0.45) * this.nextVariance()
 
     for (const defender of defenders) {
@@ -216,12 +216,18 @@ export class CombatSystem {
   }
 }
 
-function getSideAttack(units: UnitState[]): number {
-  return units.reduce((sum, unit) => sum + unit.attack * getUnitEffectiveness(unit), 0) * getStackingModifier(units.length)
+function getSideAttack(units: UnitState[], province: Province): number {
+  return units.reduce((sum, unit) => {
+    const terrainModifier = unit.terrainProfile[province.terrainType]?.attack ?? 1
+    return sum + unit.attack * terrainModifier * getUnitEffectiveness(unit)
+  }, 0) * getStackingModifier(units.length)
 }
 
-function getSideDefense(units: UnitState[]): number {
-  return units.reduce((sum, unit) => sum + unit.defense * getUnitEffectiveness(unit), 0) * getStackingModifier(units.length)
+function getSideDefense(units: UnitState[], province: Province): number {
+  return units.reduce((sum, unit) => {
+    const terrainModifier = unit.terrainProfile[province.terrainType]?.defense ?? 1
+    return sum + unit.defense * terrainModifier * getUnitEffectiveness(unit)
+  }, 0) * getStackingModifier(units.length)
 }
 
 function getUnitEffectiveness(unit: UnitState): number {

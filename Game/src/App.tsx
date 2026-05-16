@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Factory, Flame, Fuel, Pickaxe, Users, Wheat, Zap, Hammer, Plus, X, Save, Trash2, PencilRuler } from 'lucide-react'
+import { Edit3, Factory, Flame, Fuel, Hammer, PencilRuler, Pickaxe, Plus, Save, Swords, Trash2, Users, Wheat, X, Zap } from 'lucide-react'
 import './App.css'
 import { BUILDING_DEFINITIONS, type BuildingType } from './game/economy/ConstructionTypes'
 import type { ResourceId, ResourceYields } from './game/province/provinceTypes'
@@ -7,6 +7,7 @@ import {
   BATTALION_DEFINITIONS,
   calculateDivisionStats,
   MAX_BATTALIONS_PER_TEMPLATE,
+  TERRAIN_TYPES,
   type BattalionType,
   type DivisionNode,
   type DivisionTemplate,
@@ -54,6 +55,7 @@ function App() {
   const prototypeRef = useRef<StrategyPrototype | null>(null)
   const [hudState, setHudState] = useState<PrototypeHudState>(initialHudState)
   const [isDesignerOpen, setIsDesignerOpen] = useState(false)
+  const [editingTemplate, setEditingTemplate] = useState<DivisionTemplate | null>(null)
   const [deploymentProvinceId, setDeploymentProvinceId] = useState<number | null>(null)
   const playerEconomy = hudState.economy?.[PLAYER_COUNTRY_ID] ?? null
   const selectedProvinceId = hudState.selectedProvince?.id ?? null
@@ -93,6 +95,16 @@ function App() {
 
   const saveTemplate = useCallback((draft: { id?: string; name: string; nodes: DivisionNode[] }) => {
     prototypeRef.current?.saveDivisionTemplate(draft)
+  }, [])
+
+  const openNewDesigner = useCallback(() => {
+    setEditingTemplate(null)
+    setIsDesignerOpen(true)
+  }, [])
+
+  const openDesignerForTemplate = useCallback((template: DivisionTemplate) => {
+    setEditingTemplate(template)
+    setIsDesignerOpen(true)
   }, [])
 
   return (
@@ -307,10 +319,14 @@ function App() {
                   <Plus size={14} />
                   Train
                 </button>
+                <button className="management-btn small secondary" onClick={() => openDesignerForTemplate(template)}>
+                  <Edit3 size={14} />
+                  Edit
+                </button>
               </div>
             ))}
           </div>
-          <button className="designer-open-btn" onClick={() => setIsDesignerOpen(true)}>
+          <button className="designer-open-btn" onClick={openNewDesigner}>
             <PencilRuler size={15} />
             Open Division Designer
           </button>
@@ -356,6 +372,10 @@ function App() {
               <div className="detail-row">
                 <span className="detail-label">Region</span>
                 <span className="detail-value">{hudState.selectedProvince.economyRegion}</span>
+              </div>
+              <div className="detail-row">
+                <span className="detail-label">Terrain</span>
+                <span className="detail-value">{formatTerrainName(hudState.selectedProvince.terrainType)}</span>
               </div>
               <div className="detail-row">
                 <span className="detail-label">Status</span>
@@ -540,7 +560,11 @@ function App() {
       ))}
 
       {isDesignerOpen && (
-        <DivisionDesignerModal templates={hudState.training.templates} onClose={() => setIsDesignerOpen(false)} onSave={saveTemplate} />
+        <DivisionDesignerModal
+          initialTemplate={editingTemplate}
+          onClose={() => setIsDesignerOpen(false)}
+          onSave={saveTemplate}
+        />
       )}
     </main>
   )
@@ -581,23 +605,18 @@ function ResourceIcon({ resourceId }: { resourceId: ResourceId }) {
 }
 
 interface DivisionDesignerModalProps {
-  templates: DivisionTemplate[]
+  initialTemplate: DivisionTemplate | null
   onClose: () => void
   onSave: (draft: { id?: string; name: string; nodes: DivisionNode[] }) => void
 }
 
-function DivisionDesignerModal({ templates, onClose, onSave }: DivisionDesignerModalProps) {
-  const [templateId, setTemplateId] = useState<string | undefined>(undefined)
-  const [name, setName] = useState('New Division')
-  const [nodes, setNodes] = useState<DivisionNode[]>([])
+function DivisionDesignerModal({ initialTemplate, onClose, onSave }: DivisionDesignerModalProps) {
+  const [templateId] = useState<string | undefined>(initialTemplate?.id)
+  const [name, setName] = useState(initialTemplate?.name ?? 'New Division')
+  const [nodes, setNodes] = useState<DivisionNode[]>(() => initialTemplate ? cloneTemplateNodes(initialTemplate) : [])
+  const baselineStats = initialTemplate?.stats ?? null
   const stats = calculateDivisionStats(nodes)
   const canSave = nodes.length > 0 && nodes.length <= MAX_BATTALIONS_PER_TEMPLATE
-
-  const loadTemplate = (template: DivisionTemplate) => {
-    setTemplateId(template.id)
-    setName(template.name)
-    setNodes(template.nodes.map((node) => ({ ...node, id: `${node.id}-edit-${Date.now()}` })))
-  }
 
   const addNode = (battalionType: BattalionType, x: number, y: number) => {
     if (nodes.length >= MAX_BATTALIONS_PER_TEMPLATE) {
@@ -647,7 +666,7 @@ function DivisionDesignerModal({ templates, onClose, onSave }: DivisionDesignerM
       <div className="designer-modal">
         <div className="designer-header">
           <div>
-            <span className="designer-kicker">Division Designer</span>
+            <span className="designer-kicker">{initialTemplate ? 'Edit Division Template' : 'Division Designer'}</span>
             <input className="designer-name-input" value={name} onChange={(event) => setName(event.target.value)} />
           </div>
           <div className="designer-header-actions">
@@ -679,13 +698,6 @@ function DivisionDesignerModal({ templates, onClose, onSave }: DivisionDesignerM
                 </div>
               )
             })}
-
-            <span className="designer-column-title saved-title">Saved Templates</span>
-            {templates.map((template) => (
-              <button key={template.id} className="saved-template-btn" onClick={() => loadTemplate(template)}>
-                {template.name}
-              </button>
-            ))}
           </aside>
 
           <section
@@ -694,19 +706,20 @@ function DivisionDesignerModal({ templates, onClose, onSave }: DivisionDesignerM
             onDrop={handleCanvasDrop}
           >
             <svg className="division-lines">
-              {nodes.slice(1).map((node, index) => {
-                const previous = nodes[index]
-                return (
-                  <line
-                    key={`${previous.id}-${node.id}`}
-                    x1={previous.x + 65}
-                    y1={previous.y + 24}
-                    x2={node.x + 65}
-                    y2={node.y + 24}
-                  />
-                )
-              })}
+              {nodes.map((node) => (
+                <line
+                  key={`center-${node.id}`}
+                  x1="50%"
+                  y1="50%"
+                  x2={node.x + 65}
+                  y2={node.y + 24}
+                />
+              ))}
             </svg>
+            <div className="division-center-emblem">
+              <Swords size={42} />
+              <span>Division</span>
+            </div>
             {nodes.length === 0 && <div className="canvas-empty">Drag battalions here</div>}
             {nodes.map((node, index) => {
               const battalion = BATTALION_DEFINITIONS[node.battalionType]
@@ -731,20 +744,31 @@ function DivisionDesignerModal({ templates, onClose, onSave }: DivisionDesignerM
 
           <aside className="designer-stats">
             <span className="designer-column-title">Template Stats</span>
-            <DesignerStat label="Manpower" value={stats.manpower} />
-            <DesignerStat label="Equipment" value={stats.equipment} />
-            <DesignerStat label="Training" value={`${stats.trainingDays}d`} />
-            <DesignerStat label="Speed" value={Math.round(stats.speed)} />
-            <DesignerStat label="Soft Attack" value={Math.round(stats.softAttack)} />
-            <DesignerStat label="Hard Attack" value={Math.round(stats.hardAttack)} />
-            <DesignerStat label="Defense" value={Math.round(stats.defense)} />
-            <DesignerStat label="Breakthrough" value={Math.round(stats.breakthrough)} />
-            <DesignerStat label="Armor" value={Math.round(stats.armor)} />
-            <DesignerStat label="Piercing" value={Math.round(stats.piercing)} />
-            <DesignerStat label="Reliability" value={`${Math.round(stats.reliability * 100)}%`} />
-            <DesignerStat label="Maneuver" value={Math.round(stats.maneuverability)} />
-            <DesignerStat label="Supply" value={stats.supplyUse.toFixed(1)} />
-            <DesignerStat label="Fuel" value={stats.fuelUse.toFixed(1)} />
+            <DesignerStat label="Manpower" value={stats.manpower} baseline={baselineStats?.manpower} harmfulIncrease />
+            <DesignerStat label="Equipment" value={stats.equipment} baseline={baselineStats?.equipment} harmfulIncrease />
+            <DesignerStat label="Training" value={stats.trainingDays} suffix="d" baseline={baselineStats?.trainingDays} harmfulIncrease />
+            <DesignerStat label="Speed" value={Math.round(stats.speed)} baseline={baselineStats ? Math.round(baselineStats.speed) : undefined} />
+            <DesignerStat label="Soft Attack" value={Math.round(stats.softAttack)} baseline={baselineStats ? Math.round(baselineStats.softAttack) : undefined} />
+            <DesignerStat label="Hard Attack" value={Math.round(stats.hardAttack)} baseline={baselineStats ? Math.round(baselineStats.hardAttack) : undefined} />
+            <DesignerStat label="Defense" value={Math.round(stats.defense)} baseline={baselineStats ? Math.round(baselineStats.defense) : undefined} />
+            <DesignerStat label="Breakthrough" value={Math.round(stats.breakthrough)} baseline={baselineStats ? Math.round(baselineStats.breakthrough) : undefined} />
+            <DesignerStat label="Armor" value={Math.round(stats.armor)} baseline={baselineStats ? Math.round(baselineStats.armor) : undefined} />
+            <DesignerStat label="Piercing" value={Math.round(stats.piercing)} baseline={baselineStats ? Math.round(baselineStats.piercing) : undefined} />
+            <DesignerStat label="Reliability" value={Math.round(stats.reliability * 100)} suffix="%" baseline={baselineStats ? Math.round(baselineStats.reliability * 100) : undefined} />
+            <DesignerStat label="Maneuver" value={Math.round(stats.maneuverability)} baseline={baselineStats ? Math.round(baselineStats.maneuverability) : undefined} />
+            <DesignerStat label="Supply" value={Number(stats.supplyUse.toFixed(1))} baseline={baselineStats ? Number(baselineStats.supplyUse.toFixed(1)) : undefined} harmfulIncrease />
+            <DesignerStat label="Fuel" value={Number(stats.fuelUse.toFixed(1))} baseline={baselineStats ? Number(baselineStats.fuelUse.toFixed(1)) : undefined} harmfulIncrease />
+            <span className="designer-column-title terrain-title">Terrain Effects</span>
+            <div className="terrain-effects-table">
+              {TERRAIN_TYPES.map((terrainType) => (
+                <div key={terrainType} className="terrain-effect-row">
+                  <span>{formatTerrainName(terrainType)}</span>
+                  <strong>{formatModifier(stats.terrainProfile[terrainType].attack)}</strong>
+                  <strong>{formatModifier(stats.terrainProfile[terrainType].defense)}</strong>
+                  <strong>{formatModifier(stats.terrainProfile[terrainType].speed)}</strong>
+                </div>
+              ))}
+            </div>
             <div className={`designer-validation ${canSave ? 'valid' : 'invalid'}`}>
               {canSave ? `${nodes.length}/${MAX_BATTALIONS_PER_TEMPLATE} battalions` : 'Add 1-6 battalions'}
             </div>
@@ -755,13 +779,56 @@ function DivisionDesignerModal({ templates, onClose, onSave }: DivisionDesignerM
   )
 }
 
-function DesignerStat({ label, value }: { label: string; value: number | string }) {
+function DesignerStat({
+  label,
+  value,
+  suffix = '',
+  baseline,
+  harmfulIncrease = false,
+}: {
+  label: string
+  value: number
+  suffix?: string
+  baseline?: number
+  harmfulIncrease?: boolean
+}) {
+  const delta = baseline === undefined ? 0 : value - baseline
+  const isMeaningfulDelta = Math.abs(delta) > 0.01
+  const isGood = harmfulIncrease ? delta < 0 : delta > 0
+
   return (
     <div className="designer-stat-row">
       <span>{label}</span>
-      <strong>{value}</strong>
+      <strong>
+        {value}{suffix}
+        {isMeaningfulDelta && (
+          <span className={`stat-delta ${isGood ? 'positive' : 'negative'}`}>
+            {delta > 0 ? '+' : ''}{formatDelta(delta)}{suffix}
+          </span>
+        )}
+      </strong>
     </div>
   )
+}
+
+function cloneTemplateNodes(template: DivisionTemplate): DivisionNode[] {
+  return template.nodes.map((node, index) => ({
+    ...node,
+    id: `${template.id}-edit-${index}-${Date.now()}`,
+  }))
+}
+
+function formatTerrainName(terrainType: string): string {
+  return terrainType.replace(/([A-Z])/g, ' $1').replace(/^./, (letter) => letter.toUpperCase())
+}
+
+function formatModifier(value: number): string {
+  const percent = Math.round((value - 1) * 100)
+  return percent === 0 ? '0%' : `${percent > 0 ? '+' : ''}${percent}%`
+}
+
+function formatDelta(delta: number): string {
+  return Number.isInteger(delta) ? String(delta) : delta.toFixed(1)
 }
 
 function BattlePopup({ combat }: BattlePopupProps) {

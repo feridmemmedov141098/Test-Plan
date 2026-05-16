@@ -15,6 +15,7 @@ import {
   calculateDivisionStats,
   createStarterDivisionTemplates,
   MAX_BATTALIONS_PER_TEMPLATE,
+  NEUTRAL_TERRAIN_PROFILE,
   type DivisionNode,
   type DivisionTemplate,
   type TrainingJob,
@@ -38,6 +39,7 @@ export interface PrototypeHudState {
       barracks: number
       militaryComplex: number
     }
+    terrainType: string
     economyRegion: string
     primaryResource: string
     resourceYields: ResourceYields
@@ -413,6 +415,7 @@ export class StrategyPrototype {
       attack: 12,
       defense: 10,
       reliability: 0.85,
+      terrainProfile: NEUTRAL_TERRAIN_PROFILE,
       experience: 0,
       status: 'idle',
       reinforcementDelayHours: 0,
@@ -1081,7 +1084,10 @@ export class StrategyPrototype {
 
       const direction = target.clone().sub(unit.position)
       const distance = direction.length()
-      const travel = unit.speed * scaledDelta
+      const targetProvinceId = unit.routeProvinceIds[unit.routeIndex]
+      const targetTerrain = targetProvinceId === undefined ? null : this.provinceState.getProvince(targetProvinceId).terrainType
+      const terrainSpeedModifier = targetTerrain ? unit.terrainProfile[targetTerrain]?.speed ?? 1 : 1
+      const travel = unit.speed * terrainSpeedModifier * scaledDelta
 
       if (distance <= travel) {
         unit.position.copy(target)
@@ -1200,6 +1206,7 @@ export class StrategyPrototype {
       attack: Math.round(job.stats.attack),
       defense: Math.round(job.stats.defense),
       reliability: job.stats.reliability,
+      terrainProfile: job.stats.terrainProfile,
       experience: 0,
       status: 'idle',
       reinforcementDelayHours: 0,
@@ -1345,6 +1352,7 @@ export class StrategyPrototype {
             controllerName: COUNTRY_NAMES[selectedProvince.controllerCountryId],
             unitCount: selectedProvince.units.length,
             buildings: selectedProvince.buildings,
+            terrainType: selectedProvince.terrainType,
             economyRegion: selectedProvince.economyRegion,
             primaryResource: selectedProvince.primaryResource,
             resourceYields: selectedProvince.resourceYields,
