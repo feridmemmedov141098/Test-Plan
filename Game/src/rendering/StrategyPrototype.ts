@@ -135,6 +135,7 @@ export interface ActiveCombatOverlay {
   id: string
   provinceId: number
   screenPosition: { x: number; y: number } | null
+  worldPosition: { x: number; y: number; z: number }
   attacker: {
     countryId: string
     countryName: string
@@ -192,17 +193,18 @@ const MAX_SUPPLY_HOURS = 168
 const SUPPLY_DISPATCH_THRESHOLD = 96
 const SUPPLY_DELIVERY_HOURS = 96
 const SUPPLY_VEHICLE_SPEED = 36
-const IDLE_SUPPLY_DEMAND_MULTIPLIER = 0.014
-const MOVING_SUPPLY_DEMAND_MULTIPLIER = 0.028
+const IDLE_SUPPLY_DEMAND_MULTIPLIER = 0.0014
+const MOVING_SUPPLY_DEMAND_MULTIPLIER = 0.009
 const COMBAT_SUPPLY_DEMAND_MULTIPLIER = 0.055
 const ENCIRCLED_SUPPLY_DEMAND_MULTIPLIER = 0.075
-const MIN_IDLE_SUPPLY_DEMAND = 0.04
-const MIN_MOVING_SUPPLY_DEMAND = 0.08
+const MIN_IDLE_SUPPLY_DEMAND = 0.004
+const MIN_MOVING_SUPPLY_DEMAND = 0.027
 const MIN_COMBAT_SUPPLY_DEMAND = 0.16
 
 export class StrategyPrototype {
   private readonly container: HTMLDivElement
   private readonly setHudState: HudCallback
+  private readonly onSelectTrainingProvince?: (provinceId: number) => void
   private readonly scene = new THREE.Scene()
   private readonly raycaster = new THREE.Raycaster()
   private readonly pointer = new THREE.Vector2()
@@ -222,6 +224,7 @@ export class StrategyPrototype {
   private readonly supplyVehicles: SupplyVehicleState[] = []
   private readonly supplyVehicleGroups = new Map<string, THREE.Mesh>()
   private readonly battleEffects: BattleEffect[] = []
+  private readonly buildingMeshes = new Map<number, THREE.Group>()
   private renderer: THREE.WebGLRenderer | null = null
   private camera: THREE.OrthographicCamera | null = null
   private provinceState: ProvinceState | null = null
@@ -261,9 +264,10 @@ export class StrategyPrototype {
   private nextBattleEffectSerial = 1
   private readonly HUD_UPDATE_INTERVAL = 0.15
 
-  constructor(container: HTMLDivElement, setHudState: HudCallback) {
+  constructor(container: HTMLDivElement, setHudState: HudCallback, onSelectTrainingProvince?: (provinceId: number) => void) {
     this.container = container
     this.setHudState = setHudState
+    this.onSelectTrainingProvince = onSelectTrainingProvince
   }
 
   async start(): Promise<void> {
@@ -325,6 +329,7 @@ export class StrategyPrototype {
 
       this.initializeDivisionTemplates()
       this.initializeStartingBuildings()
+      this.refreshBuildingVisuals()
       this.economySystem.ensureProductionSlots(PLAYER_COUNTRY_ID, this.getPlayerBuildingCounts().militaryComplex)
       this.economySystem.ensureProductionSlots('armenia', this.getBuildingCountsForCountry('armenia').militaryComplex)
       this.createSelectionMeshes()
@@ -911,6 +916,9 @@ export class StrategyPrototype {
       this.setSelectedProvince(province.id)
       this.updateSelectionVisuals()
       this.updateHud('Province selected')
+      if (this.isValidDeploymentProvince(province) && this.onSelectTrainingProvince) {
+        this.onSelectTrainingProvince(province.id)
+      }
     }
   }
 
@@ -1037,9 +1045,10 @@ export class StrategyPrototype {
         continue
       }
 
-      const screenPosition = this.getScreenPosition(unit.position)
+      const screenPosition = this.getScreenPosition(unit.position.x, unit.position.y, unit.position.z)
 
       if (
+        screenPosition &&
         screenPosition.x >= left &&
         screenPosition.x <= right &&
         screenPosition.y >= top &&
@@ -1074,8 +1083,11 @@ export class StrategyPrototype {
     this.updateHud(this.selectedUnitIds.size > 1 ? `${this.selectedUnitIds.size} units selected` : 'Unit selected')
   }
 
-  private getScreenPosition(worldPosition: THREE.Vector3): { x: number; y: number } {
-    const projected = worldPosition.clone().project(this.camera!)
+  getScreenPosition(worldX: number, worldY: number, worldZ: number): { x: number; y: number } | null {
+    if (!this.camera) {
+      return null
+    }
+    const projected = new THREE.Vector3(worldX, worldY, worldZ).project(this.camera)
     const containerRect = this.container.getBoundingClientRect()
 
     return {
@@ -1532,27 +1544,28 @@ export class StrategyPrototype {
     group.userData.type = 'explosion'
     group.userData.intensity = intensity
 
-    // Core flash — bright expanding sphere
+    // Core flash — bright fire-orange expanding sphere
     const flash = new THREE.Mesh(
       new THREE.SphereGeometry(0.3 + intensity * 0.15, 8, 8),
-      new THREE.MeshBasicMaterial({ color: 0xffe066, transparent: true, opacity: 1 }),
+      new THREE.MeshBasicMaterial({ color: 0xff4400, transparent: true, opacity: 1 }),
     )
     flash.userData.isFlash = true
 
-    // Shockwave ring
+    // Shockwave ring — hot orange
     const shockwave = new THREE.Mesh(
       new THREE.RingGeometry(0.1, 0.4, 16),
-      new THREE.MeshBasicMaterial({ color: 0xffa500, transparent: true, opacity: 0.7, side: THREE.DoubleSide }),
+      new THREE.MeshBasicMaterial({ color: 0xff6600, transparent: true, opacity: 0.7, side: THREE.DoubleSide }),
     )
     shockwave.rotation.x = -Math.PI / 2
     shockwave.userData.isShockwave = true
 
-    // Debris particles (small dark cubes)
+    // Debris particles — glowing hot shrapnel in red/orange
     const debrisCount = Math.floor(4 + intensity * 3)
     for (let i = 0; i < debrisCount; i++) {
+      const fireColor = i % 2 === 0 ? 0xff3300 : 0xffaa00
       const debris = new THREE.Mesh(
         new THREE.BoxGeometry(0.15, 0.15, 0.15),
-        new THREE.MeshBasicMaterial({ color: 0x2a2a2a, transparent: true, opacity: 0.9 }),
+        new THREE.MeshBasicMaterial({ color: fireColor, transparent: true, opacity: 0.95 }),
       )
       debris.userData.isDebris = true
       debris.userData.velocity = new THREE.Vector3(
@@ -1569,10 +1582,10 @@ export class StrategyPrototype {
       group.add(debris)
     }
 
-    // Smoke puff
+    // Smoke puff — dark fire smoke
     const smoke = new THREE.Mesh(
       new THREE.SphereGeometry(0.8 + intensity * 0.3, 8, 8),
-      new THREE.MeshBasicMaterial({ color: 0x3a3a3a, transparent: true, opacity: 0.5 }),
+      new THREE.MeshBasicMaterial({ color: 0x2a1a10, transparent: true, opacity: 0.6 }),
     )
     smoke.userData.isSmoke = true
 
@@ -1593,19 +1606,20 @@ export class StrategyPrototype {
     group.position.copy(center.clone().add(offset))
     group.userData.type = 'gunfire'
 
-    // Muzzle flash — small bright burst
+    // Muzzle flash — small bright orange burst
     const muzzleFlash = new THREE.Mesh(
       new THREE.SphereGeometry(0.15 + intensity * 0.05, 6, 6),
-      new THREE.MeshBasicMaterial({ color: 0xfff5c2, transparent: true, opacity: 1 }),
+      new THREE.MeshBasicMaterial({ color: 0xff5500, transparent: true, opacity: 1 }),
     )
     muzzleFlash.userData.isMuzzle = true
 
-    // Tracer sparks
+    // Tracer sparks — hot red/orange
     const sparkCount = Math.floor(3 + intensity * 2)
     for (let i = 0; i < sparkCount; i++) {
+      const sparkColor = i % 2 === 0 ? 0xff3300 : 0xff7700
       const spark = new THREE.Mesh(
         new THREE.SphereGeometry(0.06, 4, 4),
-        new THREE.MeshBasicMaterial({ color: 0xffcc44, transparent: true, opacity: 1 }),
+        new THREE.MeshBasicMaterial({ color: sparkColor, transparent: true, opacity: 1 }),
       )
       spark.userData.isSpark = true
       spark.userData.velocity = new THREE.Vector3(
@@ -1617,10 +1631,10 @@ export class StrategyPrototype {
       group.add(spark)
     }
 
-    // Small smoke wisp
+    // Small smoke wisp — dark fire smoke
     const wisp = new THREE.Mesh(
       new THREE.SphereGeometry(0.25 + intensity * 0.1, 6, 6),
-      new THREE.MeshBasicMaterial({ color: 0x555555, transparent: true, opacity: 0.3 }),
+      new THREE.MeshBasicMaterial({ color: 0x3a2015, transparent: true, opacity: 0.4 }),
     )
     wisp.userData.isWisp = true
 
@@ -1861,6 +1875,8 @@ export class StrategyPrototype {
       }
     }
 
+    this.refreshBuildingVisuals()
+
     for (const job of economy.trainingQueue) {
       if (job.status === 'training') {
         job.daysRemaining = Math.max(0, job.daysRemaining - 1)
@@ -1973,6 +1989,80 @@ export class StrategyPrototype {
     ).length
 
     return province.buildings[buildingType] + queued
+  }
+
+  private refreshBuildingVisuals(): void {
+    if (!this.provinceState) {
+      return
+    }
+
+    // Remove old building meshes
+    for (const group of this.buildingMeshes.values()) {
+      this.scene.remove(group)
+      group.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          obj.geometry.dispose()
+          if (obj.material instanceof THREE.Material) {
+            obj.material.dispose()
+          }
+        }
+      })
+    }
+    this.buildingMeshes.clear()
+
+    const barracksMaterial = new THREE.MeshStandardMaterial({ color: 0x8B7355, roughness: 0.8 })
+    const complexMaterial = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.5, metalness: 0.3 })
+
+    for (const province of this.provinceState.provinces) {
+      const totalBuildings = province.buildings.barracks + province.buildings.militaryComplex
+      if (totalBuildings === 0) {
+        continue
+      }
+
+      const center = province.bounds.getCenter(new THREE.Vector3())
+      const margin = 2.0
+      const minX = province.bounds.min.x + margin
+      const maxX = province.bounds.max.x - margin
+      const minZ = province.bounds.min.z + margin
+      const maxZ = province.bounds.max.z - margin
+
+      if (minX >= maxX || minZ >= maxZ) {
+        continue
+      }
+
+      const group = new THREE.Group()
+      const buildingTypes: Array<'barracks' | 'militaryComplex'> = []
+      for (let i = 0; i < province.buildings.barracks; i++) buildingTypes.push('barracks')
+      for (let i = 0; i < province.buildings.militaryComplex; i++) buildingTypes.push('militaryComplex')
+
+      for (let i = 0; i < buildingTypes.length; i++) {
+        const angle = (i / buildingTypes.length) * Math.PI * 2 + (i % 3) * 0.4
+        const radius = 1.8 + (i % 2) * 1.5
+        let bx = center.x + Math.cos(angle) * radius
+        let bz = center.z + Math.sin(angle) * radius
+        bx = THREE.MathUtils.clamp(bx, minX, maxX)
+        bz = THREE.MathUtils.clamp(bz, minZ, maxZ)
+
+        if (buildingTypes[i] === 'barracks') {
+          const mesh = new THREE.Mesh(
+            new THREE.BoxGeometry(1.0, 0.5, 2.0),
+            barracksMaterial,
+          )
+          mesh.position.set(bx, 0.25, bz)
+          group.add(mesh)
+        } else {
+          const mesh = new THREE.Mesh(
+            new THREE.ConeGeometry(0.8, 1.5, 4),
+            complexMaterial,
+          )
+          mesh.position.set(bx, 0.75, bz)
+          group.add(mesh)
+        }
+      }
+
+      this.scene.add(group)
+      this.buildingMeshes.set(province.id, group)
+    }
   }
 
   private updateSelectionVisuals(): void {
@@ -2222,6 +2312,7 @@ export class StrategyPrototype {
         id: combat.id,
         provinceId: combat.provinceId,
         screenPosition: { x: screenX, y: screenY },
+        worldPosition: { x: province.centerWorld.x, y: province.centerWorld.y + 12, z: province.centerWorld.z },
         attacker: {
           countryId: combat.attackerCountryId,
           countryName: COUNTRY_NAMES[combat.attackerCountryId],

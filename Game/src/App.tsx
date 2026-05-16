@@ -68,6 +68,10 @@ function App() {
   const [isDesignerOpen, setIsDesignerOpen] = useState(false)
   const [editingTemplate, setEditingTemplate] = useState<DivisionTemplate | null>(null)
   const [deploymentProvinceId, setDeploymentProvinceId] = useState<number | null>(null)
+  const onSelectTrainingProvinceRef = useRef<((provinceId: number) => void) | undefined>(undefined)
+  onSelectTrainingProvinceRef.current = (provinceId) => {
+    setDeploymentProvinceId(provinceId)
+  }
   const [activeTab, setActiveTab] = useState<'construction' | 'stockpile'>('construction')
   const playerEconomy = hudState.economy?.[PLAYER_COUNTRY_ID] ?? null
   const selectedProvinceId = hudState.selectedProvince?.id ?? null
@@ -81,7 +85,9 @@ function App() {
       return
     }
 
-    const prototype = new StrategyPrototype(mount, setHudState)
+    const prototype = new StrategyPrototype(mount, setHudState, (provinceId) => {
+      onSelectTrainingProvinceRef.current?.(provinceId)
+    })
     prototypeRef.current = prototype
     void prototype.start()
 
@@ -616,7 +622,7 @@ function App() {
 
       {/* Battle Popups */}
       {hudState.activeCombats.filter((combat) => combat.id !== hudState.activeCombat?.id && !hudState.battleForecast).map((combat) => (
-        <BattlePopup key={combat.id} combat={combat} />
+        <BattlePopup key={combat.id} combat={combat} prototypeRef={prototypeRef} />
       ))}
 
       {isDesignerOpen && (
@@ -1098,16 +1104,39 @@ function formatTerrainName(terrainType: string): string {
 }
 
 function formatModifier(value: number): string {
-  const percent = Math.round((value - 1) * 100)
-  return percent === 0 ? '0%' : `${percent > 0 ? '+' : ''}${percent}%`
+  const sign = value >= 0 ? '+' : ''
+  return `${sign}${value}%`
 }
 
 function formatDelta(delta: number): string {
   return Number.isInteger(delta) ? String(delta) : delta.toFixed(1)
 }
 
-function BattlePopup({ combat }: BattlePopupProps) {
-  if (!combat.screenPosition) return null
+interface BattlePopupProps {
+  combat: ActiveCombatOverlay
+  prototypeRef: React.MutableRefObject<StrategyPrototype | null>
+}
+
+function BattlePopup({ combat, prototypeRef }: BattlePopupProps) {
+  const divRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    let animFrame: number
+    const update = () => {
+      const div = divRef.current
+      const prototype = prototypeRef.current
+      if (div && prototype && combat.worldPosition) {
+        const pos = prototype.getScreenPosition(combat.worldPosition.x, combat.worldPosition.y, combat.worldPosition.z)
+        if (pos) {
+          div.style.left = `${pos.x - 140}px`
+          div.style.top = `${pos.y - 80}px`
+        }
+      }
+      animFrame = requestAnimationFrame(update)
+    }
+    animFrame = requestAnimationFrame(update)
+    return () => cancelAnimationFrame(animFrame)
+  }, [combat.id, prototypeRef])
 
   const indicatorClass =
     combat.advantage === 'attacker' ? 'advantage-winning' :
@@ -1116,10 +1145,11 @@ function BattlePopup({ combat }: BattlePopupProps) {
 
   return (
     <div
+      ref={divRef}
       className="battle-popup"
       style={{
-        left: combat.screenPosition.x - 140,
-        top: combat.screenPosition.y - 80,
+        left: combat.screenPosition ? combat.screenPosition.x - 140 : 0,
+        top: combat.screenPosition ? combat.screenPosition.y - 80 : 0,
       }}
     >
       <div className={`battle-indicator ${indicatorClass}`}></div>
