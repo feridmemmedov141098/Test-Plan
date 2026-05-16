@@ -1,0 +1,54 @@
+{
+  "hash": "a1328141",
+  "configHash": "bca14ea8",
+  "lockfileHash": "58bd9fc0",
+  "browserHash": "64009d5f",
+  "optimized": {
+    "react-dom/client": {
+      "src": "../../node_modules/react-dom/client.js",
+      "file": "react-dom_client.js",
+      "fileHash": "baa0e417",
+      "needsInterop": true
+    },
+    "react": {
+      "src": "../../node_modules/react/index.js",
+      "file": "react.js",
+      "fileHash": "cb677f28",
+      "needsInterop": true
+    },
+    "react/jsx-dev-runtime": {
+      "src": "../../node_modules/react/jsx-dev-runtime.js",
+      "file": "react_jsx-dev-runtime.js",
+      "fileHash": "481caf72",
+      "needsInterop": true
+    },
+    "svg-path-properties": {
+      "src": "../../node_modules/svg-path-properties/dist/main.mjs",
+      "file": "svg-path-properties.js",
+      "fileHash": "648a81e8",
+      "needsInterop": false
+    },
+    "three": {
+      "src": "../../node_modules/three/build/three.module.js",
+      "file": "three.js",
+      "fileHash": "daf19e61",
+      "needsInterop": false
+    },
+    "three/examples/jsm/loaders/GLTFLoader.js": {
+      "src": "../../node_modules/three/examples/jsm/loaders/GLTFLoader.js",
+      "file": "three_examples_jsm_loaders_GLTFLoader__js.js",
+      "fileHash": "6ca3ad1b",
+      "needsInterop": false
+    }
+  },
+  "chunks": {
+    "react-DGPCLjpP": {
+      "file": "react-DGPCLjpP.js",
+      "isDynamicEntry": false
+    },
+    "three.module-B4Q7tMDo": {
+      "file": "three.module-B4Q7tMDo.js",
+      "isDynamicEntry": false
+    }
+  }
+}

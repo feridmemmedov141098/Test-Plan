@@ -1,0 +1,103 @@
+.app-shell {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #151711;
+  color: #f0eadb;
+}
+
+.map-viewport {
+  position: absolute;
+  inset: 0;
+}
+
+.map-viewport canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.hud {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  gap: 10px;
+  color: #e7dfcf;
+  font-size: 13px;
+  line-height: 1.3;
+  pointer-events: none;
+  text-align: left;
+}
+
+.hud > div {
+  display: grid;
+  gap: 2px;
+  min-width: 116px;
+  padding: 9px 11px;
+  border: 1px solid rgba(229, 217, 190, 0.24);
+  background: rgba(29, 34, 27, 0.82);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.26);
+  backdrop-filter: blur(8px);
+}
+
+.hud strong {
+  color: #fff7df;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.hud span {
+  color: #cfc6b6;
+  white-space: nowrap;
+}
+
+.hud-top {
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  justify-content: space-between;
+}
+
+.hud-side {
+  right: 12px;
+  bottom: 12px;
+  flex-direction: column;
+}
+
+.loading-panel {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at 50% 45%, rgba(48, 56, 43, 0.35), rgba(15, 17, 14, 0.92));
+  color: #fff4d6;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 760px) {
+  .hud {
+    font-size: 12px;
+  }
+
+  .hud-top {
+    flex-direction: column;
+    right: auto;
+  }
+
+  .hud-side {
+    left: 12px;
+    right: auto;
+  }
+
+  .hud > div {
+    min-width: 100px;
+    padding: 8px 9px;
+  }
+}
