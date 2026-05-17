@@ -1033,13 +1033,16 @@ export class StrategyPrototype {
     const unitId = this.pickUnit(event)
 
     if (unitId) {
+      const unit = this.units.find((entry) => entry.id === unitId)
+      if (!unit || unit.countryId !== PLAYER_COUNTRY_ID) {
+        return
+      }
       if (event.shiftKey) {
         this.toggleUnitSelection(unitId)
       } else {
         this.setSelectedUnits([unitId], unitId)
       }
-      const unit = this.units.find((entry) => entry.id === unitId)
-      this.selectedProvinceId = unit?.provinceId ?? null
+      this.selectedProvinceId = unit.provinceId
       this.setSelectedProvince(this.selectedProvinceId)
       this.updateSelectionVisuals()
       this.updateHud(this.selectedUnitIds.size > 1 ? `${this.selectedUnitIds.size} units selected` : 'Unit selected')
@@ -1097,7 +1100,7 @@ export class StrategyPrototype {
   }
 
   private issueMoveOrderForUnit(unit: UnitState, targetProvinceId: number): boolean {
-    if (!this.provinceState || !this.pathfinding || unit.manpower <= 0 || unit.status === 'inCombat') {
+    if (!this.provinceState || !this.pathfinding || unit.manpower <= 0 || unit.status === 'inCombat' || unit.countryId !== PLAYER_COUNTRY_ID) {
       return false
     }
 
@@ -1200,7 +1203,7 @@ export class StrategyPrototype {
     const unitIds: string[] = []
 
     for (const unit of this.units) {
-      if (unit.manpower <= 0) {
+      if (unit.manpower <= 0 || unit.countryId !== PLAYER_COUNTRY_ID) {
         continue
       }
 
@@ -1266,6 +1269,11 @@ export class StrategyPrototype {
   }
 
   private toggleUnitSelection(unitId: string): void {
+    const unit = this.units.find((entry) => entry.id === unitId)
+    if (!unit || unit.countryId !== PLAYER_COUNTRY_ID) {
+      return
+    }
+
     if (this.selectedUnitIds.has(unitId)) {
       this.selectedUnitIds.delete(unitId)
       this.selectedUnitId = this.selectedUnitIds.values().next().value ?? null
