@@ -246,6 +246,7 @@ export class StrategyPrototype {
   private unitSelectionRingGeometry: THREE.TorusGeometry | null = null
   private unitSelectionRingMaterial: THREE.MeshBasicMaterial | null = null
   private selectionBoxElement: HTMLDivElement | null = null
+  private frontlineDrawingGeneralId: string | null = null
   private routeLine: THREE.Line | null = null
   private readonly routeLines = new Map<string, THREE.Line>()
   private animationFrame = 0
@@ -855,6 +856,10 @@ export class StrategyPrototype {
     this.generalSystem.setFrontline(generalId, provinceIds)
   }
 
+  setFrontlineDrawingGeneralId(generalId: string | null): void {
+    this.frontlineDrawingGeneralId = generalId
+  }
+
   createGeneralBattlePlan(generalId: string, targetProvinceIds: number[]): void {
     this.generalSystem.createBattlePlan(generalId, targetProvinceIds)
   }
@@ -1000,7 +1005,11 @@ export class StrategyPrototype {
         this.container.releasePointerCapture(event.pointerId)
 
         if (drag.isSelecting) {
-          this.selectUnitsInScreenRect(drag)
+          if (this.frontlineDrawingGeneralId) {
+            this.selectProvincesInScreenRect(drag)
+          } else {
+            this.selectUnitsInScreenRect(drag)
+          }
           return
         }
       }
@@ -1034,6 +1043,24 @@ export class StrategyPrototype {
   }
 
   private handleLeftClick(event: PointerEvent): void {
+    // Frontline single-click toggle
+    if (this.frontlineDrawingGeneralId) {
+      const province = this.pickProvince(event)
+      if (province) {
+        const general = this.generalSystem.getGeneral(this.frontlineDrawingGeneralId)
+        if (general) {
+          const current = general.frontlineProvinceIds
+          const next = current.includes(province.id)
+            ? current.filter((id) => id !== province.id)
+            : [...current, province.id]
+          this.generalSystem.setFrontline(this.frontlineDrawingGeneralId, next)
+          this.setSelectedProvince(province.id)
+          this.updateHud(`Frontline: ${next.length} provinces`)
+        }
+        return
+      }
+    }
+
     const unitId = this.pickUnit(event)
 
     if (unitId) {
@@ -1247,6 +1274,53 @@ export class StrategyPrototype {
     this.setSelectedProvince(this.selectedProvinceId)
     this.updateSelectionVisuals()
     this.updateHud(this.selectedUnitIds.size > 1 ? `${this.selectedUnitIds.size} units selected` : 'Unit selected')
+  }
+
+  private selectProvincesInScreenRect(drag: NonNullable<StrategyPrototype['leftDrag']>): void {
+    if (!this.camera || !this.frontlineDrawingGeneralId) {
+      return
+    }
+
+    const containerRect = this.container.getBoundingClientRect()
+    const left = Math.min(drag.startX, drag.currentX) - containerRect.left
+    const right = Math.max(drag.startX, drag.currentX) - containerRect.left
+    const top = Math.min(drag.startY, drag.currentY) - containerRect.top
+    const bottom = Math.max(drag.startY, drag.currentY) - containerRect.top
+    const provinceIds: number[] = []
+
+    for (const mesh of this.mapRenderer.getPickMeshes()) {
+      const provinceId = (mesh as THREE.Mesh).userData.provinceId as number | undefined
+      if (provinceId === undefined) continue
+
+      const pos = (mesh as THREE.Mesh).geometry.boundingBox?.getCenter(new THREE.Vector3())
+      if (!pos) continue
+
+      const screenPosition = this.getScreenPosition(pos.x, pos.y, pos.z)
+      if (
+        screenPosition &&
+        screenPosition.x >= left &&
+        screenPosition.x <= right &&
+        screenPosition.y >= top &&
+        screenPosition.y <= bottom
+      ) {
+        provinceIds.push(provinceId)
+      }
+    }
+
+    if (provinceIds.length === 0) {
+      return
+    }
+
+    const general = this.generalSystem.getGeneral(this.frontlineDrawingGeneralId)
+    if (!general) return
+
+    const current = new Set(general.frontlineProvinceIds)
+    for (const id of provinceIds) {
+      current.add(id)
+    }
+    this.generalSystem.setFrontline(this.frontlineDrawingGeneralId, [...current])
+    this.setSelectedProvince(provinceIds[0])
+    this.updateHud(`Frontline: ${current.size} provinces`)
   }
 
   getScreenPosition(worldX: number, worldY: number, worldZ: number): { x: number; y: number } | null {

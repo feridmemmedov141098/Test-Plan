@@ -144,7 +144,6 @@ function GeneralsPanel({ prototypeRef, onSetFrontline }: { prototypeRef: React.M
   }, [prototypeRef])
 
   const playerGenerals = generals.filter((g) => g.countryId === PLAYER_COUNTRY_ID)
-  const aiGenerals = generals.filter((g) => g.countryId !== PLAYER_COUNTRY_ID)
 
   const handleRecruit = () => {
     const queued = prototypeRef.current?.createGeneral()
@@ -214,27 +213,6 @@ function GeneralsPanel({ prototypeRef, onSetFrontline }: { prototypeRef: React.M
         ))}
       </div>
 
-      <div className="generals-section">
-        <span className="generals-section-title">Enemy Generals</span>
-        {aiGenerals.map((general) => (
-          <div key={general.id} className="general-card enemy">
-            <div className="general-header">
-              <User size={14} />
-              <span className="general-name">{general.name}</span>
-              <span className="general-skill">{'★'.repeat(general.skill)}</span>
-            </div>
-            <div className="general-traits">
-              {general.traits.map((trait) => (
-                <span key={trait} className="general-trait">{trait.replace(/_/g, ' ')}</span>
-              ))}
-            </div>
-            <div className="general-stats">
-              <span>Units: {general.assignedUnitIds.length}</span>
-              {general.battlePlan && <span className="battle-phase">Phase: {general.battlePlan.currentPhase}</span>}
-            </div>
-          </div>
-        ))}
-      </div>
     </div>
   )
 }
@@ -255,6 +233,10 @@ function App() {
   const [leftOpen, setLeftOpen] = useState(false)
   const [rightOpen, setRightOpen] = useState(false)
   const [frontlineDrawingGeneralId, setFrontlineDrawingGeneralId] = useState<string | null>(null)
+
+  useEffect(() => {
+    prototypeRef.current?.setFrontlineDrawingGeneralId(frontlineDrawingGeneralId)
+  }, [frontlineDrawingGeneralId])
   const playerEconomy = hudState.economy?.[PLAYER_COUNTRY_ID] ?? null
   const selectedProvinceId = hudState.selectedProvince?.id ?? null
   const activeDeploymentProvinceId = deploymentProvinceId ?? selectedProvinceId ?? hudState.training.validDeploymentProvinceIds[0] ?? null
