@@ -2330,3 +2330,178 @@
 .icon-btn.danger:hover {
   background: rgba(255, 107, 107, 0.15);
 }
+
+/* Diplomacy Panel */
+.diplomacy-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.diplomacy-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.diplomacy-card.at-war {
+  border-color: rgba(255, 80, 80, 0.3);
+  background: rgba(255, 80, 80, 0.04);
+}
+
+.diplomacy-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.diplomacy-country {
+  font-weight: 700;
+  font-size: 14px;
+  color: #e8e4d9;
+}
+
+.diplomacy-score {
+  font-weight: 800;
+  font-size: 13px;
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+.diplomacy-score.good { color: #4ade80; }
+.diplomacy-score.neutral { color: #fbbf24; }
+.diplomacy-score.poor { color: #fb923c; }
+.diplomacy-score.hostile { color: #f87171; }
+
+.diplomacy-status {
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.war-badge {
+  color: #f87171;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.nap-badge {
+  color: #60a5fa;
+}
+
+.peace-badge {
+  color: #4ade80;
+}
+
+.diplomacy-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.management-btn.danger {
+  border-color: rgba(255, 80, 80, 0.4);
+  color: #f87171;
+}
+
+.management-btn.danger:hover {
+  background: rgba(255, 80, 80, 0.12);
+}
+
+/* Generals Panel */
+.generals-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.generals-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.generals-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #a8a49a;
+  letter-spacing: 0.5px;
+}
+
+.general-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.general-card:hover {
+  border-color: rgba(247, 223, 114, 0.25);
+}
+
+.general-card.selected {
+  border-color: rgba(247, 223, 114, 0.5);
+  background: rgba(247, 223, 114, 0.06);
+}
+
+.general-card.enemy {
+  border-color: rgba(255, 80, 80, 0.15);
+}
+
+.general-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.general-name {
+  font-weight: 700;
+  font-size: 13px;
+  color: #e8e4d9;
+}
+
+.general-skill {
+  color: #fbbf24;
+  font-size: 11px;
+}
+
+.general-traits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.general-trait {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #a8a49a;
+  text-transform: capitalize;
+}
+
+.general-stats {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: #888;
+}
+
+.battle-phase {
+  color: #fbbf24;
+}
+
+.general-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}

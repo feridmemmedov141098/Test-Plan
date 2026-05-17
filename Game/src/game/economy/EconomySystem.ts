@@ -46,6 +46,7 @@ export class EconomySystem {
       const economy = this.countries[province.controllerCountryId]
 
       for (const resourceId of RESOURCE_IDS) {
+        if (resourceId === 'money') continue
         economy.dailyIncome[resourceId] += province.resourceYields[resourceId]
         economy.stockpiles[resourceId] += province.resourceYields[resourceId]
       }
@@ -53,6 +54,9 @@ export class EconomySystem {
 
     for (const economy of Object.values(this.countries)) {
       economy.manpowerPool = economy.stockpiles.manpower
+      // Money income from industry (tax base from factories)
+      economy.stockpiles.money += economy.stockpiles.industry * 0.5
+      economy.dailyIncome.money += economy.stockpiles.industry * 0.5
 
       for (const line of economy.productionLines) {
         const output = FACTORY_OUTPUT_BASE[line.category] * line.factoryCount
@@ -206,6 +210,7 @@ function createCountryEconomy(startingManpower: number, startingIndustry: number
   const equipmentStockpiles = createEmptyEquipmentStockpiles()
   stockpiles.manpower = startingManpower
   stockpiles.industry = startingIndustry
+  stockpiles.money = startingIndustry * 10
   stockpiles.ammunition = startingIndustry * 4
   equipmentStockpiles.smallArms = startingIndustry * 3
   equipmentStockpiles.antiTankWeapons = Math.round(startingIndustry * 0.35)

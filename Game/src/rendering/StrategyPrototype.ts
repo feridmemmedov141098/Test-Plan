@@ -2,6 +2,8 @@ import * as THREE from 'three'
 import { AIController } from '../game/ai/AIController'
 import type { AIActions, AIContext } from '../game/ai/AITypes'
 import { CombatSystem, type CombatInstance } from '../game/combat/CombatSystem'
+import { DiplomacySystem } from '../game/diplomacy/DiplomacySystem'
+import { GeneralSystem } from '../game/generals/GeneralSystem'
 import type { BattleProjection } from '../game/combat/CombatSimulator'
 import { EQUIPMENT_CATEGORIES, EQUIPMENT_PRODUCTION_OUTPUT, type EquipmentCategory, type EquipmentStockpiles, type ProducibleCategory, type ProductionLine } from '../game/equipment/EquipmentTypes'
 import {
@@ -223,6 +225,8 @@ export class StrategyPrototype {
   private readonly unitFactory = new UnitModelFactory()
   private readonly economySystem = new EconomySystem()
   private readonly combatSystem = new CombatSystem()
+  private readonly diplomacySystem = new DiplomacySystem()
+  private readonly generalSystem = new GeneralSystem()
   private readonly aiController = new AIController(AI_COUNTRY_IDS)
   private readonly divisionTemplates = new Map<string, DivisionTemplate>()
   private readonly units: UnitState[] = []
@@ -347,6 +351,7 @@ export class StrategyPrototype {
       this.refreshBuildingVisuals()
       this.createSelectionMeshes()
       this.createUnits()
+      this.generalSystem.setupAIGenerals('armenia')
       this.economySystem.tickDaily(this.provinceState.provinces)
       this.absorbSupplyTruckStockpiles()
       this.addEventListeners()
@@ -790,6 +795,74 @@ export class StrategyPrototype {
     this.renderer.setSize(width, height)
   }
 
+  // --- Diplomacy API ---
+
+  getDiplomacyRelations(): import('../game/diplomacy/DiplomacyTypes').DiplomaticRelation[] {
+    return this.diplomacySystem.getAllRelationsFor(PLAYER_COUNTRY_ID)
+  }
+
+  declareWar(target: CountryId): boolean {
+    return this.diplomacySystem.declareWar(PLAYER_COUNTRY_ID, target, this.currentDay)
+  }
+
+  offerPeace(target: CountryId): boolean {
+    return this.diplomacySystem.offerPeace(PLAYER_COUNTRY_ID, target, this.currentDay)
+  }
+
+  proposeNap(target: CountryId): boolean {
+    return this.diplomacySystem.proposeNap(PLAYER_COUNTRY_ID, target, this.currentDay)
+  }
+
+  sendGift(target: CountryId): boolean {
+    return this.diplomacySystem.sendGift(PLAYER_COUNTRY_ID, target)
+  }
+
+  createTradeOffer(
+    target: CountryId,
+    offer: Partial<import('../game/province/provinceTypes').ResourceYields>,
+    request: Partial<import('../game/province/provinceTypes').ResourceYields>,
+    durationDays: number,
+    isMilitary: boolean
+  ): import('../game/diplomacy/DiplomacyTypes').TradeDeal | null {
+    return this.diplomacySystem.createTradeOffer(PLAYER_COUNTRY_ID, target, offer, request, durationDays, isMilitary)
+  }
+
+  // --- Generals API ---
+
+  createGeneral(): import('../game/generals/GeneralTypes').General {
+    return this.generalSystem.createGeneral(PLAYER_COUNTRY_ID)
+  }
+
+  getPlayerGenerals(): import('../game/generals/GeneralTypes').General[] {
+    return this.generalSystem.getGeneralsForCountry(PLAYER_COUNTRY_ID)
+  }
+
+  getAllGenerals(): import('../game/generals/GeneralTypes').General[] {
+    return [...this.generalSystem.getGeneralsForCountry('azerbaijan'), ...this.generalSystem.getGeneralsForCountry('armenia')]
+  }
+
+  assignUnitsToGeneral(generalId: string, unitIds: string[]): void {
+    this.generalSystem.assignUnits(generalId, unitIds)
+  }
+
+  setGeneralFrontline(generalId: string, provinceIds: number[]): void {
+    this.generalSystem.setFrontline(generalId, provinceIds)
+  }
+
+  createGeneralBattlePlan(generalId: string, targetProvinceIds: number[]): void {
+    this.generalSystem.createBattlePlan(generalId, targetProvinceIds)
+  }
+
+  cancelGeneralBattlePlan(generalId: string): void {
+    this.generalSystem.cancelBattlePlan(generalId)
+  }
+
+  dismissGeneral(generalId: string): void {
+    this.generalSystem.dismissGeneral(generalId)
+  }
+
+  // --- Private event handlers ---
+
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
     this.keyState.add(event.code)
 
@@ -1026,7 +1099,7 @@ export class StrategyPrototype {
 
     const targetProvince = this.provinceState.getProvince(targetProvinceId)
 
-    if (targetProvince.controllerCountryId !== unit.countryId && !areAtWar(unit.countryId, targetProvince.controllerCountryId)) {
+    if (targetProvince.controllerCountryId !== unit.countryId && !this.diplomacySystem.areAtWar(unit.countryId, targetProvince.controllerCountryId)) {
       return false
     }
 
@@ -1274,7 +1347,13 @@ export class StrategyPrototype {
         this.currentHour = 0
         this.currentDay += 1
         this.economySystem.tickDaily(this.provinceState.provinces)
+        this.diplomacySystem.tickDaily(this.currentDay)
         this.updateAllProductionAndQueues()
+      }
+
+      // General system tick every 6 hours
+      if (this.currentHour % 6 === 0) {
+        this.tickGenerals()
       }
     }
 
@@ -1311,6 +1390,24 @@ export class StrategyPrototype {
     }
 
     this.aiController.tick(context, actions)
+  }
+
+  private tickGenerals(): void {
+    if (!this.provinceState) {
+      return
+    }
+
+    const context = {
+      provinces: this.provinceState.provinces,
+      units: this.units,
+      currentDay: this.currentDay,
+      currentHour: this.currentHour,
+    }
+    const actions = {
+      issueMoveOrder: (unitId: string, targetProvinceId: number) => this.issueMoveOrder(unitId, targetProvinceId),
+    }
+
+    this.generalSystem.tick(context, actions)
   }
 
   private updateFortifications(): void {
@@ -1949,7 +2046,7 @@ export class StrategyPrototype {
     const isEnemyControlled = province.controllerCountryId !== unit.countryId
     const enemyCountryId = enemyUnit?.countryId ?? province.controllerCountryId
 
-    if ((hasEnemyUnits || isEnemyControlled) && areAtWar(unit.countryId, enemyCountryId)) {
+    if ((hasEnemyUnits || isEnemyControlled) && this.diplomacySystem.areAtWar(unit.countryId, enemyCountryId)) {
       this.combatSystem.startCombat(province, unit, this.units)
       this.mapRenderer.refreshAllProvinceColors(this.provinceState.provinces)
       this.setSelectedProvince(this.selectedProvinceId)
@@ -2521,6 +2618,3 @@ function pickSpawnProvinces(provinces: Province[], count: number): Province[] {
   return result
 }
 
-function areAtWar(left: CountryId, right: CountryId): boolean {
-  return left !== right
-}

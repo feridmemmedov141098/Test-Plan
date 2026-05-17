@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bomb, Edit3, Factory, Flame, Fuel, Hammer, MapPin, PencilRuler, Pickaxe, Plus, Save, Swords, Trash2, Users, Wheat, X, Zap } from 'lucide-react'
+import { Banknote, Bomb, Edit3, Factory, Flame, Fuel, Hammer, Handshake, MapPin, PencilRuler, Pickaxe, Plus, Save, Shield, Swords, Trash2, User, Users, Wheat, X, Zap } from 'lucide-react'
 import './App.css'
 import { EQUIPMENT_CATEGORIES, EQUIPMENT_LABELS, FACTORY_OUTPUT_BASE, MAX_FACTORY_COUNT_PER_LINE, PRODUCIBLE_CATEGORIES, PRODUCIBLE_LABELS, type EquipmentCategory, type ProducibleCategory } from './game/equipment/EquipmentTypes'
 import { BUILDING_DEFINITIONS, type BuildingType } from './game/economy/ConstructionTypes'
@@ -16,10 +16,11 @@ import {
 import { StrategyPrototype, type ActiveCombatOverlay, type PrototypeHudState, type TimeSpeed } from './rendering/StrategyPrototype'
 
 const PLAYER_COUNTRY_ID = 'azerbaijan'
-const RESOURCE_ORDER: ResourceId[] = ['manpower', 'industry', 'oil', 'gas', 'metal', 'food', 'energy', 'ammunition']
+const RESOURCE_ORDER: ResourceId[] = ['manpower', 'industry', 'money', 'oil', 'gas', 'metal', 'food', 'energy', 'ammunition']
 const RESOURCE_META: Record<ResourceId, { label: string; Icon: typeof Users }> = {
   manpower: { label: 'Manpower', Icon: Users },
   industry: { label: 'Industry', Icon: Factory },
+  money: { label: 'Money', Icon: Banknote },
   oil: { label: 'Oil', Icon: Fuel },
   gas: { label: 'Gas', Icon: Flame },
   metal: { label: 'Metal', Icon: Pickaxe },
@@ -66,6 +67,144 @@ const initialHudState: PrototypeHudState = {
   mapStats: null,
 }
 
+function DiplomacyPanel({ prototypeRef, currentDay }: { prototypeRef: React.MutableRefObject<StrategyPrototype | null>; currentDay: number }) {
+  const [relations, setRelations] = useState<import('./game/diplomacy/DiplomacyTypes').DiplomaticRelation[]>([])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setRelations(prototypeRef.current?.getDiplomacyRelations() ?? [])
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [prototypeRef])
+
+  if (relations.length === 0) {
+    return <div className="empty-state compact">No diplomatic relations</div>
+  }
+
+  return (
+    <div className="diplomacy-panel">
+      {relations.map((relation) => {
+        const otherCountry = relation.countryA === PLAYER_COUNTRY_ID ? relation.countryB : relation.countryA
+        const isWar = relation.isAtWar
+        const relationColor = relation.score > 40 ? 'good' : relation.score > -20 ? 'neutral' : relation.score > -60 ? 'poor' : 'hostile'
+
+        return (
+          <div key={`${relation.countryA}-${relation.countryB}`} className={`diplomacy-card ${isWar ? 'at-war' : ''}`}>
+            <div className="diplomacy-header">
+              <span className="diplomacy-country">{otherCountry === 'armenia' ? 'Armenia' : 'Azerbaijan'}</span>
+              <span className={`diplomacy-score ${relationColor}`}>{relation.score > 0 ? '+' : ''}{Math.round(relation.score)}</span>
+            </div>
+            <div className="diplomacy-status">
+              {isWar ? (
+                <span className="war-badge"><Swords size={12} /> War (Day {currentDay - (relation.warStartDay ?? 0)})</span>
+              ) : relation.nonAggressionPact ? (
+                <span className="nap-badge">Non-Aggression Pact</span>
+              ) : (
+                <span className="peace-badge">Peace</span>
+              )}
+            </div>
+            <div className="diplomacy-actions">
+              {isWar ? (
+                <>
+                  <button className="management-btn small" onClick={() => prototypeRef.current?.offerPeace(otherCountry)}>Offer Peace</button>
+                  <button className="management-btn small" onClick={() => prototypeRef.current?.sendGift(otherCountry)}>Send Gift</button>
+                </>
+              ) : (
+                <>
+                  <button className="management-btn small danger" onClick={() => prototypeRef.current?.declareWar(otherCountry)}>Declare War</button>
+                  {!relation.nonAggressionPact && (
+                    <button className="management-btn small" onClick={() => prototypeRef.current?.proposeNap(otherCountry)}>Propose NAP</button>
+                  )}
+                  <button className="management-btn small" onClick={() => prototypeRef.current?.sendGift(otherCountry)}>Send Gift</button>
+                </>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function GeneralsPanel({ prototypeRef }: { prototypeRef: React.MutableRefObject<StrategyPrototype | null> }) {
+  const [generals, setGenerals] = useState<import('./game/generals/GeneralTypes').General[]>([])
+  const [selectedGeneralId, setSelectedGeneralId] = useState<string | null>(null)
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setGenerals(prototypeRef.current?.getAllGenerals() ?? [])
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [prototypeRef])
+
+  const playerGenerals = generals.filter((g) => g.countryId === PLAYER_COUNTRY_ID)
+  const aiGenerals = generals.filter((g) => g.countryId !== PLAYER_COUNTRY_ID)
+
+  return (
+    <div className="generals-panel">
+      <button className="management-btn" onClick={() => {
+        const g = prototypeRef.current?.createGeneral()
+        if (g) setSelectedGeneralId(g.id)
+      }}>
+        <Plus size={14} />
+        <span>Recruit General (50 Money)</span>
+      </button>
+
+      <div className="generals-section">
+        <span className="generals-section-title">Your Generals</span>
+        {playerGenerals.length === 0 && <div className="empty-state compact">No generals recruited</div>}
+        {playerGenerals.map((general) => (
+          <div key={general.id} className={`general-card ${selectedGeneralId === general.id ? 'selected' : ''}`} onClick={() => setSelectedGeneralId(general.id)}>
+            <div className="general-header">
+              <User size={14} />
+              <span className="general-name">{general.name}</span>
+              <span className="general-skill">{'★'.repeat(general.skill)}</span>
+            </div>
+            <div className="general-traits">
+              {general.traits.map((trait) => (
+                <span key={trait} className="general-trait">{trait.replace(/_/g, ' ')}</span>
+              ))}
+            </div>
+            <div className="general-stats">
+              <span>Units: {general.assignedUnitIds.length}</span>
+              <span>Front: {general.frontlineProvinceIds.length} provs</span>
+              {general.battlePlan && <span className="battle-phase">Phase: {general.battlePlan.currentPhase}</span>}
+            </div>
+            {selectedGeneralId === general.id && (
+              <div className="general-actions">
+                <button className="management-btn small" onClick={(e) => { e.stopPropagation(); prototypeRef.current?.cancelGeneralBattlePlan(general.id) }}>Cancel Plan</button>
+                <button className="management-btn small danger" onClick={(e) => { e.stopPropagation(); prototypeRef.current?.dismissGeneral(general.id); setSelectedGeneralId(null) }}>Dismiss</button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="generals-section">
+        <span className="generals-section-title">Enemy Generals</span>
+        {aiGenerals.map((general) => (
+          <div key={general.id} className="general-card enemy">
+            <div className="general-header">
+              <User size={14} />
+              <span className="general-name">{general.name}</span>
+              <span className="general-skill">{'★'.repeat(general.skill)}</span>
+            </div>
+            <div className="general-traits">
+              {general.traits.map((trait) => (
+                <span key={trait} className="general-trait">{trait.replace(/_/g, ' ')}</span>
+              ))}
+            </div>
+            <div className="general-stats">
+              <span>Units: {general.assignedUnitIds.length}</span>
+              {general.battlePlan && <span className="battle-phase">Phase: {general.battlePlan.currentPhase}</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function App() {
   const mountRef = useRef<HTMLDivElement | null>(null)
   const prototypeRef = useRef<StrategyPrototype | null>(null)
@@ -78,7 +217,7 @@ function App() {
   onSelectTrainingProvinceRef.current = (provinceId) => {
     setDeploymentProvinceId(provinceId)
   }
-  const [activeTab, setActiveTab] = useState<'construction' | 'stockpile' | 'production'>('construction')
+  const [activeTab, setActiveTab] = useState<'construction' | 'stockpile' | 'production' | 'diplomacy' | 'generals'>('construction')
   const playerEconomy = hudState.economy?.[PLAYER_COUNTRY_ID] ?? null
   const selectedProvinceId = hudState.selectedProvince?.id ?? null
   const activeDeploymentProvinceId = deploymentProvinceId ?? selectedProvinceId ?? hudState.training.validDeploymentProvinceIds[0] ?? null
@@ -248,6 +387,14 @@ function App() {
               <Factory size={16} />
               <span>Stock</span>
             </button>
+            <button className={`panel-tab ${activeTab === 'diplomacy' ? 'active' : ''}`} onClick={() => setActiveTab('diplomacy')} title="Diplomacy">
+              <Handshake size={16} />
+              <span>Diplo</span>
+            </button>
+            <button className={`panel-tab ${activeTab === 'generals' ? 'active' : ''}`} onClick={() => setActiveTab('generals')} title="Generals">
+              <Shield size={16} />
+              <span>Gens</span>
+            </button>
           </div>
           <div key={activeTab} className="panel-tab-content">
           {activeTab === 'construction' ? (
@@ -330,6 +477,10 @@ function App() {
                 </div>
               </div>
             </>
+          ) : activeTab === 'diplomacy' ? (
+            <DiplomacyPanel prototypeRef={prototypeRef} currentDay={hudState.time.day} />
+          ) : activeTab === 'generals' ? (
+            <GeneralsPanel prototypeRef={prototypeRef} />
           ) : (
             <ProductionPanel
               production={hudState.production}

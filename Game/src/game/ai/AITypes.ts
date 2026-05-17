@@ -27,6 +27,7 @@ export interface CountryAIState {
   lastStrategicDay: number
   lastDailyDay: number
   lastOperationalHourKey: number
+  lastAttackDay?: number
   templateIds: string[]
   recentOrders: Record<string, number>
   decisionLog: string[]

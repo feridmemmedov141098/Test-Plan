@@ -95,7 +95,7 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
     manpower: 450,
     equipment: 35,
     equipmentRequirements: { ...createEmptyEquipmentStockpiles(), smallArms: 35 },
-    resourceCost: { oil: 0, gas: 0, metal: 8, food: 10, industry: 10, energy: 0, manpower: 0, ammunition: 0 },
+    resourceCost: { oil: 0, gas: 0, metal: 8, food: 10, industry: 10, energy: 0, manpower: 0, ammunition: 0, money: 0 },
     trainingDays: 4,
     softAttack: 6,
     hardAttack: 1,
@@ -125,7 +125,7 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
     manpower: 430,
     equipment: 55,
     equipmentRequirements: { ...createEmptyEquipmentStockpiles(), smallArms: 40, supportVehicles: 15 },
-    resourceCost: { oil: 14, gas: 0, metal: 16, food: 8, industry: 18, energy: 4, manpower: 0, ammunition: 0 },
+    resourceCost: { oil: 14, gas: 0, metal: 16, food: 8, industry: 18, energy: 4, manpower: 0, ammunition: 0, money: 0 },
     trainingDays: 5,
     softAttack: 7,
     hardAttack: 2,
@@ -156,7 +156,7 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
     manpower: 420,
     equipment: 75,
     equipmentRequirements: { ...createEmptyEquipmentStockpiles(), smallArms: 40, apcIfv: 35 },
-    resourceCost: { oil: 18, gas: 0, metal: 28, food: 8, industry: 26, energy: 6, manpower: 0, ammunition: 0 },
+    resourceCost: { oil: 18, gas: 0, metal: 28, food: 8, industry: 26, energy: 6, manpower: 0, ammunition: 0, money: 0 },
     trainingDays: 6,
     softAttack: 8,
     hardAttack: 4,
@@ -187,7 +187,7 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
     manpower: 300,
     equipment: 100,
     equipmentRequirements: { ...createEmptyEquipmentStockpiles(), tanks: 40, supportVehicles: 20 },
-    resourceCost: { oil: 28, gas: 0, metal: 46, food: 4, industry: 38, energy: 10, manpower: 0, ammunition: 0 },
+    resourceCost: { oil: 28, gas: 0, metal: 46, food: 4, industry: 38, energy: 10, manpower: 0, ammunition: 0, money: 0 },
     trainingDays: 8,
     softAttack: 10,
     hardAttack: 10,
@@ -219,7 +219,7 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
     manpower: 260,
     equipment: 45,
     equipmentRequirements: { ...createEmptyEquipmentStockpiles(), smallArms: 25, antiTankWeapons: 20 },
-    resourceCost: { oil: 0, gas: 0, metal: 26, food: 5, industry: 20, energy: 4, manpower: 0, ammunition: 0 },
+    resourceCost: { oil: 0, gas: 0, metal: 26, food: 5, industry: 20, energy: 4, manpower: 0, ammunition: 0, money: 0 },
     trainingDays: 5,
     softAttack: 3,
     hardAttack: 13,
@@ -249,7 +249,7 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
     manpower: 220,
     equipment: 65,
     equipmentRequirements: { ...createEmptyEquipmentStockpiles(), artillery: 24, supportVehicles: 10 },
-    resourceCost: { oil: 0, gas: 0, metal: 34, food: 4, industry: 28, energy: 6, manpower: 0, ammunition: 0 },
+    resourceCost: { oil: 0, gas: 0, metal: 34, food: 4, industry: 28, energy: 6, manpower: 0, ammunition: 0, money: 0 },
     trainingDays: 6,
     softAttack: 18,
     hardAttack: 2,
@@ -276,7 +276,7 @@ export const BATTALION_DEFINITIONS: Record<BattalionType, BattalionDefinition> =
 }
 
 export function createEmptyDivisionResourceCost(): ResourceYields {
-  return { oil: 0, gas: 0, metal: 0, food: 0, industry: 0, energy: 0, manpower: 0, ammunition: 0 }
+  return { oil: 0, gas: 0, metal: 0, food: 0, industry: 0, energy: 0, manpower: 0, ammunition: 0, money: 0 }
 }
 
 export function calculateDivisionStats(nodes: DivisionNode[]): DivisionStats {

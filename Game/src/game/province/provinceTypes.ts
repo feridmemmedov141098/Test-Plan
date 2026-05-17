@@ -5,7 +5,7 @@ export const PROVINCE_MAP_URL = 'data/maps/Map.glb'
 export const UNIT_MODEL_URL = 'data/maps/Unit_A.glb'
 
 export type CountryId = 'azerbaijan' | 'armenia'
-export type ResourceId = 'oil' | 'gas' | 'metal' | 'food' | 'industry' | 'energy' | 'manpower' | 'ammunition'
+export type ResourceId = 'oil' | 'gas' | 'metal' | 'food' | 'industry' | 'energy' | 'manpower' | 'ammunition' | 'money'
 export type ResourceYields = Record<ResourceId, number>
 export type TerrainType = 'urban' | 'suburban' | 'plains' | 'fields' | 'forest' | 'hills' | 'mountain' | 'desert'
 

@@ -6,15 +6,17 @@ import type { UnitState } from '../units/UnitTypes'
 import type { AIActions, AIContext, AIPersonality, AIPosture, CountryAIState } from './AITypes'
 
 const DEFAULT_PERSONALITY: AIPersonality = {
-  aggression: 0.45,
-  riskTolerance: 0.42,
-  reserveRatio: 0.25,
+  aggression: 0.28,
+  riskTolerance: 0.22,
+  reserveRatio: 0.40,
   industryPreference: 0.55,
   barracksPreference: 0.45,
-  attackConfidenceThreshold: 62,
+  attackConfidenceThreshold: 78,
   reinforceConfidenceThreshold: 48,
   maxAttackOperations: 1,
 }
+
+const ATTACK_COOLDOWN_DAYS = 5
 
 const OPERATIONAL_TICK_HOURS = 6
 const STRATEGIC_TICK_DAYS = 4
@@ -350,8 +352,20 @@ export class AIController {
   }
 
   private considerAttacks(state: CountryAIState, context: AIContext, actions: AIActions, hourKey: number): void {
-    if (state.posture === 'recovering') {
+    if (state.posture === 'recovering' || state.posture === 'defensive' || state.posture === 'desperate') {
       return
+    }
+
+    if (state.lastAttackDay !== undefined && context.currentDay - state.lastAttackDay < ATTACK_COOLDOWN_DAYS) {
+      return
+    }
+
+    const friendlyBorders = this.getFriendlyBorderProvinces(state.countryId, context)
+    for (const borderProvince of friendlyBorders) {
+      const defenders = getLivingUnitsInProvince(borderProvince, context.units).filter((unit) => unit.countryId === state.countryId)
+      if (defenders.length === 0) {
+        return
+      }
     }
 
     const enemyBorders = this.getEnemyBorderProvinces(state.countryId, context)
@@ -394,6 +408,7 @@ export class AIController {
 
       if (moved > 0) {
         attacksIssued += 1
+        state.lastAttackDay = context.currentDay
         this.log(state, `attacking ${province.displayName} (${Math.round(attackProbability)}%)`)
       }
     }
@@ -409,6 +424,7 @@ export class AIController {
     const noise = (Math.random() - 0.5) * 18
 
     let forecastScore = defenders.length === 0 ? 70 : 20
+    let unfavorablePenalty = 0
 
     if (defenders.length > 0) {
       const projection = context.combatSystem.getForecast(attackers, defenders, province)
@@ -418,10 +434,11 @@ export class AIController {
         forecastScore = 35 + projection.confidence * 0.15
       } else {
         forecastScore = 12 + (100 - projection.confidence) * 0.22
+        unfavorablePenalty = 20
       }
     }
 
-    return clamp(forecastScore + readiness * 24 + opportunityScore * 0.2 + aggressionBonus + riskBonus + postureBonus + noise - supplyPenalty - terrainPenalty, 0, 100)
+    return clamp(forecastScore + readiness * 24 + opportunityScore * 0.2 + aggressionBonus + riskBonus + postureBonus + noise - supplyPenalty - terrainPenalty - unfavorablePenalty, 0, 100)
   }
 
   private getAdjacentAttackers(countryId: CountryId, target: Province, context: AIContext, hourKey: number): UnitState[] {
