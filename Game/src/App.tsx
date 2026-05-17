@@ -325,31 +325,23 @@ function App() {
             <button
               className={`time-btn ${hudState.time.speed === 1 ? 'active' : ''}`}
               onClick={() => setTimeSpeed(1)}
-              title="Play (1x)"
+              title="1x"
             >
               <span className="btn-icon">▶</span>
-              <span className="btn-label">1x</span>
             </button>
             <button
               className={`time-btn ${hudState.time.speed === 2 ? 'active' : ''}`}
               onClick={() => setTimeSpeed(2)}
-              title="2x Speed"
+              title="2x"
             >
-              <span className="btn-label">2x</span>
+              <span className="btn-icon">▶▶</span>
             </button>
             <button
               className={`time-btn ${hudState.time.speed === 5 ? 'active' : ''}`}
               onClick={() => setTimeSpeed(5)}
-              title="5x Speed"
+              title="5x"
             >
-              <span className="btn-label">5x</span>
-            </button>
-            <button
-              className={`time-btn ${hudState.time.speed === 10 ? 'active' : ''}`}
-              onClick={() => setTimeSpeed(10)}
-              title="10x Speed"
-            >
-              <span className="btn-label">10x</span>
+              <span className="btn-icon">▶▶▶</span>
             </button>
           </div>
         </div>
