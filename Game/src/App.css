@@ -588,8 +588,6 @@
 .construction-panel {
   grid-column: 1;
   grid-row: 1;
-  overflow-x: hidden;
-  min-height: 0;
 }
 
 .training-panel {
@@ -1889,29 +1887,79 @@
   border-right: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.panel-section-title {
-  display: block;
-  margin-bottom: 8px;
-  font-size: 11px;
+/* ===== PANEL TABS ===== */
+.panel-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.panel-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  color: #a8a49a;
+  font-size: 12px;
   font-weight: 700;
-  color: #888;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
+  cursor: pointer;
+  transition: all 0.15s ease;
 }
 
-.panel-divider {
-  height: 1px;
-  margin: 10px 0;
+.panel-tab:hover {
   background: rgba(255, 255, 255, 0.08);
+  color: #e8e4d9;
 }
 
-.queue-list.compact {
-  gap: 4px;
-  margin-top: 6px;
+.panel-tab.active {
+  background: rgba(247, 223, 114, 0.12);
+  border-color: rgba(247, 223, 114, 0.25);
+  color: #f7df72;
 }
 
-.stockpile-grid.compact {
+/* ===== VERTICAL TAB SIDEBAR ===== */
+.construction-panel {
+  display: flex;
+  flex-direction: row;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.panel-tab-sidebar {
+  display: flex;
+  flex-direction: column;
   gap: 4px;
+  padding: 10px 6px;
+  background: rgba(0, 0, 0, 0.15);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+
+.panel-tab-sidebar .panel-tab {
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 4px;
+  width: 52px;
+  font-size: 9px;
+  text-align: center;
+}
+
+.panel-tab-sidebar .panel-tab span {
+  font-size: 9px;
+  line-height: 1.1;
+}
+
+.panel-tab-content {
+  flex: 1;
+  padding: 12px;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 /* ===== STOCKPILE PANEL ===== */
@@ -1958,10 +2006,6 @@
   color: #a8a49a;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
 }
 
 .stockpile-count {
@@ -2051,6 +2095,11 @@
   .panel-section {
     min-width: 280px;
     flex-shrink: 0;
+  }
+
+  .construction-panel {
+    flex-direction: row;
+    min-width: 320px;
   }
 }
 
