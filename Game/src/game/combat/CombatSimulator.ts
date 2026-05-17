@@ -60,8 +60,8 @@ interface SideFirepower {
   logisticsPenalty: number
 }
 
-const MAX_FORECAST_HOURS = 720
-const DAMAGE_PACE = 0.48
+const MAX_FORECAST_HOURS = 1680
+const DAMAGE_PACE = 0.18
 const ATTACKER_ASSAULT_EFFICIENCY = 0.82
 const MAX_FORTIFICATION_DAYS = 7
 const MAX_FORTIFICATION_DEFENSE_BONUS = 0.6
@@ -120,7 +120,7 @@ export function isSideBroken(units: UnitState[]): boolean {
   const equipment = units.reduce((sum, unit) => sum + unit.equipment, 0)
   const maxEquipment = units.reduce((sum, unit) => sum + unit.maxEquipment, 0)
 
-  return units.every((unit) => unit.organization <= 0) || manpower <= maxManpower * 0.22 || equipment <= maxEquipment * 0.18
+  return units.every((unit) => unit.organization <= 0) || manpower <= maxManpower * 0.32 || equipment <= maxEquipment * 0.28
 }
 
 function simulateBattleHour(attackers: UnitState[], defenders: UnitState[], province: Province, elapsedHours: number): void {
@@ -168,12 +168,12 @@ function applyFire(attackers: UnitState[], defenders: UnitState[], province: Pro
     const fortification = stance === 'attacker' ? getUnitFortification(unit, province).defense : 1
     const protection = protectionBase * terrainDefense * getBattalionReadiness(battalion) * defenderStanceModifier * defenderSummary.logisticsPenalty * fortification
     const protectedDamage = Math.min(incoming, protection) * 0.3
-    const unprotectedDamage = Math.max(0, incoming - protection) * 1.08
+    const unprotectedDamage = Math.max(0, incoming - protection) * 0.65
     const damage = (protectedDamage + unprotectedDamage) * DAMAGE_PACE
     const reliability = definition.reliability * unit.reliability
     const breakdown = (1.05 - reliability) * terrain.reliabilityHazard
     const supplyVulnerability = getSupplyVulnerability(unit)
-    const orgLoss = damage * 0.58 * supplyVulnerability
+    const orgLoss = damage * 0.40 * supplyVulnerability
     const manpowerLoss = damage * (0.72 + (1 - targetHardness) * 0.26) * (stance === 'attacker' ? 1 : 0.92) * supplyVulnerability
     const equipmentLoss = damage * (0.18 + targetHardness * 0.2 + breakdown * 0.18) * supplyVulnerability
 
@@ -529,20 +529,20 @@ function updateBattalionOutcome(unit: UnitState, battalion: UnitBattalionState, 
   const organizationRatio = battalion.organization / Math.max(1, battalion.maxOrganization)
   const noRetreat = unit.isEncircled || unit.encircledHours >= 12 || unit.hoursOutOfSupply >= 48
 
-  if (manpowerRatio <= 0.06 || equipmentRatio <= 0.04) {
+  if (manpowerRatio <= 0.05 || equipmentRatio <= 0.03) {
     battalion.status = 'destroyed'
     pushCombatEvent(unit, `${battalion.name} destroyed in ${province.displayName}`)
     return
   }
 
-  if (noRetreat && organizationRatio <= 0.16 && (manpowerRatio <= 0.38 || equipmentRatio <= 0.35)) {
+  if (noRetreat && organizationRatio <= 0.10 && (manpowerRatio <= 0.28 || equipmentRatio <= 0.25)) {
     battalion.status = 'surrendered'
     battalion.organization = 0
     pushCombatEvent(unit, `${battalion.name} surrendered while encircled`)
     return
   }
 
-  if (organizationRatio <= 0.22 || manpowerRatio <= 0.24 || equipmentRatio <= 0.2) {
+  if (organizationRatio <= 0.14 || manpowerRatio <= 0.16 || equipmentRatio <= 0.14) {
     battalion.status = 'shattered'
     pushCombatEvent(unit, `${battalion.name} shattered by combat losses`)
   }
