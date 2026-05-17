@@ -1,3 +1,4 @@
+import { AI_WAR_DAYS_REQUIRED } from '../diplomacy/DiplomacyTypes'
 import { BUILDING_DEFINITIONS, MAX_ACTIVE_CONSTRUCTION_JOBS, type BuildingType } from '../economy/ConstructionTypes'
 import { EQUIPMENT_CATEGORIES, PRODUCIBLE_CATEGORIES, type ProducibleCategory } from '../equipment/EquipmentTypes'
 import type { CountryId, Province } from '../province/provinceTypes'
@@ -71,6 +72,7 @@ export class AIController {
     this.planConstruction(state, context, actions)
     this.planProduction(state, context, actions)
     this.planTraining(state, context, actions)
+    this.considerDeclaringWar(state, context, actions)
   }
 
   private runOperationalPlanning(state: CountryAIState, context: AIContext, actions: AIActions, hourKey: number): void {
@@ -460,7 +462,8 @@ export class AIController {
     return unit.manpower > 0 && unit.status !== 'inCombat' && unit.status !== 'retreating' && unit.reinforcementDelayHours <= 0 && unit.route.length === 0 && hourKey - lastOrder >= ORDER_COOLDOWN_HOURS
   }
 
-  private getBorderBalance(countryId: CountryId, context: AIContext): number {
+  private getBorderBalance(countryId: CountryId, context: AIContext, targetCountryId?: CountryId): number {
+    const diplomacy = context.diplomacySystem
     const friendlyBorders = this.getFriendlyBorderProvinces(countryId, context)
     let friendlyStrength = 0
     let enemyStrength = 0
@@ -470,12 +473,38 @@ export class AIController {
       for (const neighborId of province.neighbors) {
         const neighbor = context.provinces[neighborId]
         if (neighbor.controllerCountryId !== countryId) {
+          if (targetCountryId && neighbor.controllerCountryId !== targetCountryId) continue
+          if (!targetCountryId && !diplomacy.areAtWar(countryId, neighbor.controllerCountryId)) continue
           enemyStrength += getLivingUnitsInProvince(neighbor, context.units).filter((unit) => unit.countryId !== countryId).reduce((sum, unit) => sum + getUnitPower(unit), 0)
         }
       }
     }
 
     return friendlyStrength / Math.max(1, enemyStrength)
+  }
+
+  private considerDeclaringWar(state: CountryAIState, context: AIContext, actions: AIActions): void {
+    const diplomacy = context.diplomacySystem
+    const relations = diplomacy.getAllRelationsFor(state.countryId)
+
+    for (const relation of relations) {
+      if (relation.isAtWar) continue
+      if (relation.nonAggressionPact) continue
+      if (relation.daysBelowWarThreshold < AI_WAR_DAYS_REQUIRED) continue
+
+      const otherCountry = relation.countryA === state.countryId ? relation.countryB : relation.countryA
+
+      // Only declare war if AI feels strong enough
+      const borderBalance = this.getBorderBalance(state.countryId, context, otherCountry)
+      const posture = state.posture
+      const feelsStrong = (posture === 'offensive' || posture === 'balanced') && borderBalance > 1.0
+
+      if (feelsStrong) {
+        if (actions.declareWar(state.countryId, otherCountry)) {
+          this.log(state, `declared war on ${otherCountry}`)
+        }
+      }
+    }
   }
 
   private scoreThreat(countryId: CountryId, province: Province, context: AIContext): number {
@@ -506,12 +535,13 @@ export class AIController {
   }
 
   private getEnemyBorderProvinces(countryId: CountryId, context: AIContext): Province[] {
+    const diplomacy = context.diplomacySystem
     const provinceIds = new Set<number>()
 
     for (const province of this.getControlledProvinces(countryId, context)) {
       for (const neighborId of province.neighbors) {
         const neighbor = context.provinces[neighborId]
-        if (neighbor.controllerCountryId !== countryId) {
+        if (neighbor.controllerCountryId !== countryId && diplomacy.areAtWar(countryId, neighbor.controllerCountryId)) {
           provinceIds.add(neighbor.id)
         }
       }

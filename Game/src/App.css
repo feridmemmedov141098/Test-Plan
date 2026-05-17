@@ -2395,6 +2395,10 @@
   color: #4ade80;
 }
 
+.tension-badge {
+  color: #fb923c;
+}
+
 .diplomacy-actions {
   display: flex;
   flex-wrap: wrap;

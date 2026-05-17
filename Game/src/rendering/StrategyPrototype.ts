@@ -1347,7 +1347,7 @@ export class StrategyPrototype {
         this.currentHour = 0
         this.currentDay += 1
         this.economySystem.tickDaily(this.provinceState.provinces)
-        this.diplomacySystem.tickDaily(this.currentDay)
+        this.diplomacySystem.tickDaily(this.currentDay, this.units, this.provinceState.provinces)
         this.updateAllProductionAndQueues()
       }
 
@@ -1377,6 +1377,7 @@ export class StrategyPrototype {
       templates: this.divisionTemplates,
       pathfinding: this.pathfinding,
       combatSystem: this.combatSystem,
+      diplomacySystem: this.diplomacySystem,
     }
     const actions: AIActions = {
       getBuildingCounts: (countryId) => this.getBuildingCountsForCountry(countryId),
@@ -1387,6 +1388,7 @@ export class StrategyPrototype {
       queueTraining: (countryId, templateId, provinceId) => this.queueDivisionTrainingForCountry(countryId, templateId, provinceId, true),
       issueMoveOrder: (unitId, targetProvinceId) => this.issueMoveOrder(unitId, targetProvinceId),
       setProductionPlan: (countryId, allocations) => this.setProductionPlanForCountry(countryId, allocations),
+      declareWar: (countryId, target) => this.diplomacySystem.declareWar(countryId, target, this.currentDay),
     }
 
     this.aiController.tick(context, actions)

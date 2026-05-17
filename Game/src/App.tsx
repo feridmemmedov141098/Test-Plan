@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Banknote, Bomb, Edit3, Factory, Flame, Fuel, Hammer, Handshake, MapPin, PencilRuler, Pickaxe, Plus, Save, Shield, Swords, Trash2, User, Users, Wheat, X, Zap } from 'lucide-react'
 import './App.css'
 import { EQUIPMENT_CATEGORIES, EQUIPMENT_LABELS, FACTORY_OUTPUT_BASE, MAX_FACTORY_COUNT_PER_LINE, PRODUCIBLE_CATEGORIES, PRODUCIBLE_LABELS, type EquipmentCategory, type ProducibleCategory } from './game/equipment/EquipmentTypes'
+import { AI_WAR_DAYS_REQUIRED } from './game/diplomacy/DiplomacyTypes'
 import { BUILDING_DEFINITIONS, type BuildingType } from './game/economy/ConstructionTypes'
 import type { ResourceId, ResourceYields } from './game/province/provinceTypes'
 import {
@@ -99,6 +100,8 @@ function DiplomacyPanel({ prototypeRef, currentDay }: { prototypeRef: React.Muta
                 <span className="war-badge"><Swords size={12} /> War (Day {currentDay - (relation.warStartDay ?? 0)})</span>
               ) : relation.nonAggressionPact ? (
                 <span className="nap-badge">Non-Aggression Pact</span>
+              ) : relation.daysBelowWarThreshold > 0 ? (
+                <span className="tension-badge">Tension: {relation.daysBelowWarThreshold}/{AI_WAR_DAYS_REQUIRED} days</span>
               ) : (
                 <span className="peace-badge">Peace</span>
               )}

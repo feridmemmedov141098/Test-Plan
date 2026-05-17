@@ -1,6 +1,8 @@
 import type { CountryId } from '../province/provinceTypes'
 import type { DiplomaticRelation, TradeDeal } from './DiplomacyTypes'
 import {
+  AI_WAR_RELATION_THRESHOLD,
+  DAILY_BORDER_TENSION,
   DAILY_TRADE_BONUS,
   DAILY_WAR_DRAIN,
   GIFT_RELATION_BONUS,
@@ -11,6 +13,7 @@ import {
   RELATION_TRADE_MILITARY,
   WAR_RELATION_PENALTY,
 } from './DiplomacyTypes'
+import type { UnitState } from '../units/UnitTypes'
 
 function relationKey(left: CountryId, right: CountryId): string {
   return [left, right].sort().join(':')
@@ -20,16 +23,17 @@ export class DiplomacySystem {
   readonly relations: Map<string, DiplomaticRelation> = new Map()
 
   constructor() {
-    // Initial state: Azerbaijan and Armenia start at war
+    // Initial state: Azerbaijan and Armenia start at peace; war must be declared
     this.relations.set(relationKey('azerbaijan', 'armenia'), {
       countryA: 'azerbaijan',
       countryB: 'armenia',
-      score: -80,
-      isAtWar: true,
-      warStartDay: 0,
+      score: 0,
+      isAtWar: false,
+      warStartDay: null,
       tradeDeals: [],
       nonAggressionPact: false,
       pactExpiryDay: null,
+      daysBelowWarThreshold: 0,
     })
   }
 
@@ -76,6 +80,7 @@ export class DiplomacySystem {
         tradeDeals: [],
         nonAggressionPact: false,
         pactExpiryDay: null,
+        daysBelowWarThreshold: 0,
       })
     }
 
@@ -165,11 +170,26 @@ export class DiplomacySystem {
     return false
   }
 
-  tickDaily(currentDay: number): void {
+  tickDaily(currentDay: number, units?: UnitState[], provinces?: import('../province/provinceTypes').Province[]): void {
     for (const relation of this.relations.values()) {
       // War relation drain
       if (relation.isAtWar) {
         relation.score = Math.max(-100, relation.score + DAILY_WAR_DRAIN)
+      }
+
+      // Border tension (only if units and provinces provided)
+      if (!relation.isAtWar && units && provinces) {
+        const tension = this.computeBorderTension(relation, units, provinces)
+        if (tension !== 0) {
+          relation.score = Math.max(-100, Math.min(100, relation.score + tension))
+        }
+      }
+
+      // Track consecutive days below war threshold
+      if (!relation.isAtWar && relation.score <= AI_WAR_RELATION_THRESHOLD) {
+        relation.daysBelowWarThreshold += 1
+      } else {
+        relation.daysBelowWarThreshold = 0
       }
 
       // Active trade bonus
@@ -194,6 +214,33 @@ export class DiplomacySystem {
       // Clean up expired deals
       relation.tradeDeals = relation.tradeDeals.filter((d) => d.daysRemaining > 0 || d.isPending)
     }
+  }
+
+  private computeBorderTension(
+    relation: DiplomaticRelation,
+    units: UnitState[],
+    provinces: import('../province/provinceTypes').Province[]
+  ): number {
+    const countryIds = new Set([relation.countryA, relation.countryB])
+    let tension = 0
+
+    // Count friendly units on border provinces adjacent to the other country
+    for (const province of provinces) {
+      if (!countryIds.has(province.controllerCountryId)) continue
+      if (province.isContested) continue
+
+      const isBorder = province.neighbors.some((neighborId) => {
+        const neighbor = provinces[neighborId]
+        return neighbor && neighbor.controllerCountryId !== province.controllerCountryId && countryIds.has(neighbor.controllerCountryId)
+      })
+
+      if (isBorder) {
+        const unitsHere = units.filter((u) => u.provinceId === province.id && u.manpower > 0 && countryIds.has(u.countryId))
+        tension += unitsHere.length * DAILY_BORDER_TENSION * 0.2
+      }
+    }
+
+    return Math.round(tension * 10) / 10
   }
 
   onProvinceCaptured(captor: CountryId, previousOwner: CountryId): void {

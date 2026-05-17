@@ -24,6 +24,7 @@ export interface DiplomaticRelation {
   tradeDeals: TradeDeal[]
   nonAggressionPact: boolean
   pactExpiryDay: number | null
+  daysBelowWarThreshold: number // tracks consecutive days relation < AI_WAR_RELATION_THRESHOLD
 }
 
 export type DiplomacyState = Record<string, DiplomaticRelation>
@@ -45,3 +46,6 @@ export const PROVINCE_CAPTURE_PENALTY = -15
 export const GIFT_RELATION_BONUS = 8
 export const DAILY_WAR_DRAIN = -2
 export const DAILY_TRADE_BONUS = 0.3
+export const DAILY_BORDER_TENSION = -0.5
+export const AI_WAR_RELATION_THRESHOLD = -50
+export const AI_WAR_DAYS_REQUIRED = 7

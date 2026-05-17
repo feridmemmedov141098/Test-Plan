@@ -1,4 +1,5 @@
 import type { CombatSystem } from '../combat/CombatSystem'
+import type { DiplomacySystem } from '../diplomacy/DiplomacySystem'
 import type { BuildingType } from '../economy/ConstructionTypes'
 import type { EconomyState } from '../economy/EconomySystem'
 import type { ProducibleCategory } from '../equipment/EquipmentTypes'
@@ -43,6 +44,7 @@ export interface AIContext {
   templates: Map<string, DivisionTemplate>
   pathfinding: ProvincePathfindingSystem
   combatSystem: CombatSystem
+  diplomacySystem: DiplomacySystem
 }
 
 export interface AIActions {
@@ -54,4 +56,5 @@ export interface AIActions {
   queueTraining(countryId: CountryId, templateId: string, provinceId: number): boolean
   issueMoveOrder(unitId: string, targetProvinceId: number): boolean
   setProductionPlan(countryId: CountryId, allocations: Partial<Record<ProducibleCategory, number>>): void
+  declareWar(countryId: CountryId, target: CountryId): boolean
 }
