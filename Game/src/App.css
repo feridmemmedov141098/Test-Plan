@@ -588,7 +588,7 @@
 .construction-panel {
   grid-column: 1;
   grid-row: 1;
-  overflow-y: auto;
+  overflow-x: hidden;
   min-height: 0;
 }
 
@@ -1889,39 +1889,29 @@
   border-right: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-/* ===== PANEL TABS ===== */
-.panel-tabs {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 10px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.panel-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
-  color: #a8a49a;
-  font-size: 12px;
+.panel-section-title {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 11px;
   font-weight: 700;
-  cursor: pointer;
-  transition: all 0.15s ease;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
 }
 
-.panel-tab:hover {
+.panel-divider {
+  height: 1px;
+  margin: 10px 0;
   background: rgba(255, 255, 255, 0.08);
-  color: #e8e4d9;
 }
 
-.panel-tab.active {
-  background: rgba(247, 223, 114, 0.12);
-  border-color: rgba(247, 223, 114, 0.25);
-  color: #f7df72;
+.queue-list.compact {
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.stockpile-grid.compact {
+  gap: 4px;
 }
 
 /* ===== STOCKPILE PANEL ===== */
@@ -1968,6 +1958,10 @@
   color: #a8a49a;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .stockpile-count {

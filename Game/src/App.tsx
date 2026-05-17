@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bomb, Edit3, Factory, Flame, Fuel, Hammer, PencilRuler, Pickaxe, Plus, Save, Swords, Trash2, Users, Wheat, X, Zap } from 'lucide-react'
+import { Bomb, Edit3, Factory, Flame, Fuel, PencilRuler, Pickaxe, Plus, Save, Swords, Trash2, Users, Wheat, X, Zap } from 'lucide-react'
 import './App.css'
 import { EQUIPMENT_CATEGORIES, EQUIPMENT_LABELS, FACTORY_OUTPUT_BASE, MAX_FACTORY_COUNT_PER_LINE, PRODUCIBLE_CATEGORIES, PRODUCIBLE_LABELS, type EquipmentCategory, type ProducibleCategory } from './game/equipment/EquipmentTypes'
 import { BUILDING_DEFINITIONS, type BuildingType } from './game/economy/ConstructionTypes'
@@ -78,7 +78,6 @@ function App() {
   onSelectTrainingProvinceRef.current = (provinceId) => {
     setDeploymentProvinceId(provinceId)
   }
-  const [activeTab, setActiveTab] = useState<'construction' | 'stockpile' | 'production'>('construction')
   const playerEconomy = hudState.economy?.[PLAYER_COUNTRY_ID] ?? null
   const selectedProvinceId = hudState.selectedProvince?.id ?? null
   const activeDeploymentProvinceId = deploymentProvinceId ?? selectedProvinceId ?? hudState.training.validDeploymentProvinceIds[0] ?? null
@@ -235,110 +234,93 @@ function App() {
       <aside className="side-panel">
 
         <div className="panel-section construction-panel">
-          <div className="panel-tabs">
-            <button className={`panel-tab ${activeTab === 'construction' ? 'active' : ''}`} onClick={() => setActiveTab('construction')}>
-              <Hammer size={14} />
-              <span>Construction</span>
-            </button>
-            <button className={`panel-tab ${activeTab === 'production' ? 'active' : ''}`} onClick={() => setActiveTab('production')}>
-              <PencilRuler size={14} />
-              <span>Production</span>
-            </button>
-            <button className={`panel-tab ${activeTab === 'stockpile' ? 'active' : ''}`} onClick={() => setActiveTab('stockpile')}>
-              <Factory size={14} />
-              <span>Stockpile</span>
-            </button>
+          <span className="panel-section-title">Construction</span>
+          <div className="building-summary">
+            <span>Barracks {hudState.construction.playerBuildings.barracks}</span>
+            <span>Complexes {hudState.construction.playerBuildings.militaryComplex}</span>
+          </div>
+          <div className="construction-actions">
+            {(Object.keys(BUILDING_DEFINITIONS) as BuildingType[]).map((buildingType) => {
+              const building = BUILDING_DEFINITIONS[buildingType]
+              const disabled =
+                selectedProvinceId === null ||
+                !hudState.construction.validConstructionProvinceIds.includes(selectedProvinceId) ||
+                hudState.construction.jobs.length >= 2
+
+              return (
+                <button key={buildingType} className="management-btn" disabled={disabled} onClick={() => queueConstruction(buildingType)}>
+                  <Plus size={14} />
+                  <span>{building.name}</span>
+                </button>
+              )
+            })}
+          </div>
+          <div className="queue-list compact">
+            {hudState.construction.jobs.length > 0 ? hudState.construction.jobs.map((job) => (
+              <div key={job.id} className="queue-item">
+                <div>
+                  <span className="queue-title">{job.buildingName}</span>
+                  <span className="queue-subtitle">{job.provinceName}</span>
+                </div>
+                <div className="queue-controls">
+                  <span>{job.daysRemaining}d</span>
+                  <button className="icon-btn" onClick={() => prototypeRef.current?.cancelConstruction(job.id)} title="Cancel construction">
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+            )) : <div className="empty-state compact">No jobs</div>}
           </div>
 
-          {activeTab === 'construction' ? (
-            <>
-              <div className="building-summary">
-                <span>Barracks {hudState.construction.playerBuildings.barracks}</span>
-                <span>Military Complexes {hudState.construction.playerBuildings.militaryComplex}</span>
-              </div>
-              <div className="construction-actions">
-                {(Object.keys(BUILDING_DEFINITIONS) as BuildingType[]).map((buildingType) => {
-                  const building = BUILDING_DEFINITIONS[buildingType]
-                  const disabled =
-                    selectedProvinceId === null ||
-                    !hudState.construction.validConstructionProvinceIds.includes(selectedProvinceId) ||
-                    hudState.construction.jobs.length >= 2
+          <div className="panel-divider"></div>
 
-                  return (
-                    <button key={buildingType} className="management-btn" disabled={disabled} onClick={() => queueConstruction(buildingType)}>
-                      <Plus size={14} />
-                      <span>{building.name}</span>
-                    </button>
-                  )
-                })}
-              </div>
-              <div className="queue-list">
-                {hudState.construction.jobs.length > 0 ? hudState.construction.jobs.map((job) => (
-                  <div key={job.id} className="queue-item">
-                    <div>
-                      <span className="queue-title">{job.buildingName}</span>
-                      <span className="queue-subtitle">{job.provinceName}</span>
-                    </div>
-                    <div className="queue-controls">
-                      <span>{job.daysRemaining}d</span>
-                      <button className="icon-btn" onClick={() => prototypeRef.current?.cancelConstruction(job.id)} title="Cancel construction">
-                        <X size={14} />
-                      </button>
-                    </div>
+          <ProductionPanel
+            production={hudState.production}
+            onAddLine={addProductionLine}
+            onDeleteLine={deleteProductionLine}
+            onSetCategory={setProductionLineCategory}
+            onSetFactoryCount={setProductionLineFactoryCount}
+          />
+
+          <div className="panel-divider"></div>
+
+          <div className="stockpile-section">
+            <span className="stockpile-section-title">Stockpile</span>
+            <div className="stockpile-grid compact">
+              {EQUIPMENT_CATEGORIES.map((category) => {
+                const count = Math.floor(hudState.stockpile.equipmentStockpiles[category])
+                const rate = hudState.stockpile.productionRates[category] ?? 0
+                const isShortage = playerEconomy && playerEconomy.trainingQueue.some((job) =>
+                  job.status === 'training' && (job.stats?.equipmentRequirements?.[category] ?? 0) > count
+                )
+                return (
+                  <div key={category} className={`stockpile-item ${isShortage ? 'shortage' : ''}`}>
+                    <span className="stockpile-name">{EQUIPMENT_LABELS[category]}</span>
+                    <span className="stockpile-count">{count}</span>
+                    {rate > 0 && <span className="stockpile-rate">+{rate}</span>}
                   </div>
-                )) : <div className="empty-state compact">No construction queued</div>}
+                )
+              })}
+            </div>
+          </div>
+          <div className="stockpile-section">
+            <div className="stockpile-grid compact">
+              <div className="stockpile-item">
+                <span className="stockpile-name">Food</span>
+                <span className="stockpile-count">{Math.floor(hudState.stockpile.food)}</span>
               </div>
-            </>
-          ) : activeTab === 'stockpile' ? (
-            <>
-              <div className="stockpile-section">
-                <span className="stockpile-section-title">Equipment Stockpile</span>
-                <div className="stockpile-grid">
-                  {EQUIPMENT_CATEGORIES.map((category) => {
-                    const count = Math.floor(hudState.stockpile.equipmentStockpiles[category])
-                    const rate = hudState.stockpile.productionRates[category] ?? 0
-                    const isShortage = playerEconomy && playerEconomy.trainingQueue.some((job) =>
-                      job.status === 'training' && (job.stats?.equipmentRequirements?.[category] ?? 0) > count
-                    )
-                    return (
-                      <div key={category} className={`stockpile-item ${isShortage ? 'shortage' : ''}`}>
-                        <span className="stockpile-name">{EQUIPMENT_LABELS[category]}</span>
-                        <span className="stockpile-count">{count}</span>
-                        {rate > 0 && <span className="stockpile-rate">+{rate}/day</span>}
-                      </div>
-                    )
-                  })}
-                </div>
+              <div className="stockpile-item">
+                <span className="stockpile-name">Ammo</span>
+                <span className="stockpile-count">{Math.floor(hudState.stockpile.ammunition)}</span>
+                {(() => {
+                  const ammoRate = hudState.production.lines
+                    .filter((line) => line.category === 'ammunition')
+                    .reduce((sum, line) => sum + line.factoryCount * FACTORY_OUTPUT_BASE.ammunition, 0)
+                  return ammoRate > 0 ? <span className="stockpile-rate">+{ammoRate}</span> : null
+                })()}
               </div>
-              <div className="stockpile-section">
-                <span className="stockpile-section-title">Supplies</span>
-                <div className="stockpile-grid">
-                  <div className="stockpile-item">
-                    <span className="stockpile-name">Food</span>
-                    <span className="stockpile-count">{Math.floor(hudState.stockpile.food)}</span>
-                  </div>
-                  <div className="stockpile-item">
-                    <span className="stockpile-name">Ammunition</span>
-                    <span className="stockpile-count">{Math.floor(hudState.stockpile.ammunition)}</span>
-                    {(() => {
-                      const ammoRate = hudState.production.lines
-                        .filter((line) => line.category === 'ammunition')
-                        .reduce((sum, line) => sum + line.factoryCount * FACTORY_OUTPUT_BASE.ammunition, 0)
-                      return ammoRate > 0 ? <span className="stockpile-rate">+{ammoRate}/day</span> : null
-                    })()}
-                  </div>
-                </div>
-              </div>
-            </>
-          ) : (
-            <ProductionPanel
-              production={hudState.production}
-              onAddLine={addProductionLine}
-              onDeleteLine={deleteProductionLine}
-              onSetCategory={setProductionLineCategory}
-              onSetFactoryCount={setProductionLineFactoryCount}
-            />
-          )}
+            </div>
+          </div>
         </div>
 
         {!hudState.selectedUnit ? <div className="panel-section training-panel">
