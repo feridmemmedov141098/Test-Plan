@@ -831,8 +831,8 @@ export class StrategyPrototype {
 
   // --- Generals API ---
 
-  createGeneral(): import('../game/generals/GeneralTypes').General {
-    return this.generalSystem.createGeneral(PLAYER_COUNTRY_ID)
+  createGeneral(): boolean {
+    return this.generalSystem.queueGeneralTraining(PLAYER_COUNTRY_ID, this.economySystem)
   }
 
   getPlayerGenerals(): import('../game/generals/GeneralTypes').General[] {
@@ -841,6 +841,10 @@ export class StrategyPrototype {
 
   getAllGenerals(): import('../game/generals/GeneralTypes').General[] {
     return [...this.generalSystem.getGeneralsForCountry('azerbaijan'), ...this.generalSystem.getGeneralsForCountry('armenia')]
+  }
+
+  getGeneralTrainingQueue(): import('../game/generals/GeneralSystem').GeneralTrainingJob[] {
+    return this.generalSystem.getTrainingQueueForCountry(PLAYER_COUNTRY_ID)
   }
 
   assignUnitsToGeneral(generalId: string, unitIds: string[]): void {
@@ -1364,6 +1368,7 @@ export class StrategyPrototype {
         this.currentDay += 1
         this.economySystem.tickDaily(this.provinceState.provinces)
         this.diplomacySystem.tickDaily(this.currentDay, this.units, this.provinceState.provinces)
+        this.generalSystem.tickDaily()
         this.updateAllProductionAndQueues()
       }
 

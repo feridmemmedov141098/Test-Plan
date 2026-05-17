@@ -2622,6 +2622,19 @@
   border-color: rgba(255, 80, 80, 0.15);
 }
 
+.general-card.training {
+  border-style: dashed;
+  opacity: 0.85;
+}
+
+.recruit-message {
+  font-size: 11px;
+  font-weight: 600;
+  color: #4ade80;
+  text-align: center;
+  padding: 4px 0;
+}
+
 .general-header {
   display: flex;
   align-items: center;

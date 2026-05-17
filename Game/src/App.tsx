@@ -131,11 +131,14 @@ function DiplomacyPanel({ prototypeRef, currentDay }: { prototypeRef: React.Muta
 
 function GeneralsPanel({ prototypeRef }: { prototypeRef: React.MutableRefObject<StrategyPrototype | null> }) {
   const [generals, setGenerals] = useState<import('./game/generals/GeneralTypes').General[]>([])
+  const [trainingQueue, setTrainingQueue] = useState<import('./game/generals/GeneralSystem').GeneralTrainingJob[]>([])
   const [selectedGeneralId, setSelectedGeneralId] = useState<string | null>(null)
+  const [recruitMessage, setRecruitMessage] = useState<string | null>(null)
 
   useEffect(() => {
     const interval = setInterval(() => {
       setGenerals(prototypeRef.current?.getAllGenerals() ?? [])
+      setTrainingQueue(prototypeRef.current?.getGeneralTrainingQueue() ?? [])
     }, 1000)
     return () => clearInterval(interval)
   }, [prototypeRef])
@@ -143,15 +146,39 @@ function GeneralsPanel({ prototypeRef }: { prototypeRef: React.MutableRefObject<
   const playerGenerals = generals.filter((g) => g.countryId === PLAYER_COUNTRY_ID)
   const aiGenerals = generals.filter((g) => g.countryId !== PLAYER_COUNTRY_ID)
 
+  const handleRecruit = () => {
+    const queued = prototypeRef.current?.createGeneral()
+    if (queued) {
+      setRecruitMessage('General training started — 7 days')
+    } else {
+      setRecruitMessage('Not enough money (50 required)')
+    }
+    setTimeout(() => setRecruitMessage(null), 2500)
+  }
+
   return (
     <div className="generals-panel">
-      <button className="management-btn" onClick={() => {
-        const g = prototypeRef.current?.createGeneral()
-        if (g) setSelectedGeneralId(g.id)
-      }}>
+      <button className="management-btn" onClick={handleRecruit}>
         <Plus size={14} />
         <span>Recruit General (50 Money)</span>
       </button>
+      {recruitMessage && <div className="recruit-message">{recruitMessage}</div>}
+
+      {trainingQueue.length > 0 && (
+        <div className="generals-section">
+          <span className="generals-section-title">In Training</span>
+          {trainingQueue.map((job, index) => (
+            <div key={index} className="general-card training">
+              <div className="general-header">
+                <span className="general-name">Cadet Officer</span>
+              </div>
+              <div className="general-stats">
+                <span>{job.daysRemaining} days remaining</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="generals-section">
         <span className="generals-section-title">Your Generals</span>
@@ -163,11 +190,13 @@ function GeneralsPanel({ prototypeRef }: { prototypeRef: React.MutableRefObject<
               <span className="general-name">{general.name}</span>
               <span className="general-skill">{'★'.repeat(general.skill)}</span>
             </div>
-            <div className="general-traits">
-              {general.traits.map((trait) => (
-                <span key={trait} className="general-trait">{trait.replace(/_/g, ' ')}</span>
-              ))}
-            </div>
+            {general.traits.length > 0 && (
+              <div className="general-traits">
+                {general.traits.map((trait) => (
+                  <span key={trait} className="general-trait">{trait.replace(/_/g, ' ')}</span>
+                ))}
+              </div>
+            )}
             <div className="general-stats">
               <span>Units: {general.assignedUnitIds.length}</span>
               <span>Front: {general.frontlineProvinceIds.length} provs</span>

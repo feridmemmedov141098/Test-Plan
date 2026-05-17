@@ -1,8 +1,11 @@
+import type { EconomySystem } from '../economy/EconomySystem'
 import type { CountryId, Province, TerrainType } from '../province/provinceTypes'
+import { createEmptyYields } from '../province/provinceMetadata'
 import type { UnitState } from '../units/UnitTypes'
 import {
   AI_GENERAL_CONFIGS,
   DOCTRINE_TRAIT_BONUSES,
+  GENERAL_CREATION_COST,
   GENERAL_NAMES,
   TERRAIN_TRAIT_MAP,
   type BattlePlan,
@@ -21,11 +24,58 @@ export interface GeneralSystemActions {
   issueMoveOrder(unitId: string, targetProvinceId: number): boolean
 }
 
+export interface GeneralTrainingJob {
+  countryId: CountryId
+  daysRemaining: number
+  name?: string
+  skill?: number
+  traits?: GeneralTrait[]
+}
+
 export class GeneralSystem {
   private readonly generals = new Map<string, General>()
+  private readonly trainingQueue: GeneralTrainingJob[] = []
   private nextGeneralId = 1
 
   constructor() {}
+
+  queueGeneralTraining(countryId: CountryId, economy: EconomySystem): boolean {
+    const cost = { ...createEmptyYields(), ...GENERAL_CREATION_COST }
+    if (!economy.canAfford(countryId, cost)) {
+      return false
+    }
+    economy.spendResources(countryId, cost)
+    this.trainingQueue.push({
+      countryId,
+      daysRemaining: 7,
+      name: undefined,
+      skill: undefined,
+      traits: undefined,
+    })
+    return true
+  }
+
+  tickDaily(): void {
+    for (const job of this.trainingQueue) {
+      job.daysRemaining -= 1
+    }
+
+    const completed = this.trainingQueue.filter((job) => job.daysRemaining <= 0)
+    for (const job of completed) {
+      this.createGeneral(job.countryId, job.name, job.skill, job.traits)
+    }
+
+    // Remove completed jobs
+    for (let i = this.trainingQueue.length - 1; i >= 0; i--) {
+      if (this.trainingQueue[i].daysRemaining <= 0) {
+        this.trainingQueue.splice(i, 1)
+      }
+    }
+  }
+
+  getTrainingQueueForCountry(countryId: CountryId): GeneralTrainingJob[] {
+    return this.trainingQueue.filter((job) => job.countryId === countryId)
+  }
 
   createGeneral(countryId: CountryId, name?: string, skill?: number, traits?: GeneralTrait[]): General {
     const id = `general-${countryId}-${this.nextGeneralId++}`
@@ -58,6 +108,11 @@ export class GeneralSystem {
   }
 
   private randomTraits(): GeneralTrait[] {
+    // 50% chance of having no traits at all
+    if (Math.random() < 0.5) {
+      return []
+    }
+
     const allTraits: GeneralTrait[] = [
       'infantry_specialist',
       'armored_expert',
