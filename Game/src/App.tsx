@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Bomb, Edit3, Factory, Flame, Fuel, Hammer, PencilRuler, Pickaxe, Plus, Save, Swords, Trash2, Users, Wheat, X, Zap } from 'lucide-react'
 import './App.css'
-import { EQUIPMENT_CATEGORIES, EQUIPMENT_LABELS, EQUIPMENT_PRODUCTION_OUTPUT, type EquipmentCategory } from './game/equipment/EquipmentTypes'
+import { EQUIPMENT_CATEGORIES, EQUIPMENT_LABELS, FACTORY_OUTPUT_BASE, MAX_FACTORY_COUNT_PER_LINE, PRODUCIBLE_CATEGORIES, PRODUCIBLE_LABELS, type EquipmentCategory, type ProducibleCategory } from './game/equipment/EquipmentTypes'
 import { BUILDING_DEFINITIONS, type BuildingType } from './game/economy/ConstructionTypes'
 import type { ResourceId, ResourceYields } from './game/province/provinceTypes'
 import {
@@ -55,6 +55,12 @@ const initialHudState: PrototypeHudState = {
     food: 0,
     productionRates: {} as Record<EquipmentCategory, number>,
   },
+  production: {
+    lines: [],
+    totalFactories: 0,
+    usedFactories: 0,
+    isOverassigned: false,
+  },
   time: { day: 1, hour: 0, speed: 1 },
   status: 'Loading province map',
   mapStats: null,
@@ -72,7 +78,7 @@ function App() {
   onSelectTrainingProvinceRef.current = (provinceId) => {
     setDeploymentProvinceId(provinceId)
   }
-  const [activeTab, setActiveTab] = useState<'construction' | 'stockpile'>('construction')
+  const [activeTab, setActiveTab] = useState<'construction' | 'stockpile' | 'production'>('construction')
   const playerEconomy = hudState.economy?.[PLAYER_COUNTRY_ID] ?? null
   const selectedProvinceId = hudState.selectedProvince?.id ?? null
   const activeDeploymentProvinceId = deploymentProvinceId ?? selectedProvinceId ?? hudState.training.validDeploymentProvinceIds[0] ?? null
@@ -115,8 +121,20 @@ function App() {
     prototypeRef.current?.saveDivisionTemplate(draft)
   }, [])
 
-  const setProductionLine = useCallback((lineId: string, category: EquipmentCategory) => {
-    prototypeRef.current?.setProductionLine(lineId, category)
+  const addProductionLine = useCallback((category: ProducibleCategory, factoryCount = 1) => {
+    prototypeRef.current?.addProductionLine(category, factoryCount)
+  }, [])
+
+  const deleteProductionLine = useCallback((lineId: string) => {
+    prototypeRef.current?.deleteProductionLine(lineId)
+  }, [])
+
+  const setProductionLineCategory = useCallback((lineId: string, category: ProducibleCategory) => {
+    prototypeRef.current?.setProductionLineCategory(lineId, category)
+  }, [])
+
+  const setProductionLineFactoryCount = useCallback((lineId: string, factoryCount: number) => {
+    prototypeRef.current?.setProductionLineFactoryCount(lineId, factoryCount)
   }, [])
 
   const openNewDesigner = useCallback(() => {
@@ -222,6 +240,10 @@ function App() {
               <Hammer size={14} />
               <span>Construction</span>
             </button>
+            <button className={`panel-tab ${activeTab === 'production' ? 'active' : ''}`} onClick={() => setActiveTab('production')}>
+              <PencilRuler size={14} />
+              <span>Production</span>
+            </button>
             <button className={`panel-tab ${activeTab === 'stockpile' ? 'active' : ''}`} onClick={() => setActiveTab('stockpile')}>
               <Factory size={14} />
               <span>Stockpile</span>
@@ -266,22 +288,8 @@ function App() {
                   </div>
                 )) : <div className="empty-state compact">No construction queued</div>}
               </div>
-              <div className="production-block">
-                <span className="designer-column-title">Production Lines</span>
-                {playerEconomy && playerEconomy.productionLines.length > 0 ? playerEconomy.productionLines.map((line) => (
-                  <div key={line.id} className="production-line">
-                    <span>{line.id.replace(`${PLAYER_COUNTRY_ID}-`, '').toUpperCase()}</span>
-                    <select value={line.category} onChange={(event) => setProductionLine(line.id, event.target.value as EquipmentCategory)}>
-                      {EQUIPMENT_CATEGORIES.map((category) => (
-                        <option key={category} value={category}>{EQUIPMENT_LABELS[category]}</option>
-                      ))}
-                    </select>
-                    <span className="production-rate">{formatProductionRate(EQUIPMENT_PRODUCTION_OUTPUT[line.category])}</span>
-                  </div>
-                )) : <div className="empty-state compact">Build Military Complexes for production</div>}
-              </div>
             </>
-          ) : (
+          ) : activeTab === 'stockpile' ? (
             <>
               <div className="stockpile-section">
                 <span className="stockpile-section-title">Equipment Stockpile</span>
@@ -312,11 +320,24 @@ function App() {
                   <div className="stockpile-item">
                     <span className="stockpile-name">Ammunition</span>
                     <span className="stockpile-count">{Math.floor(hudState.stockpile.ammunition)}</span>
-                    {playerEconomy && <span className="stockpile-rate">+{Math.floor(playerEconomy.dailyIncome.industry * 0.8 + playerEconomy.dailyIncome.metal * 0.4)}/day</span>}
+                    {(() => {
+                      const ammoRate = hudState.production.lines
+                        .filter((line) => line.category === 'ammunition')
+                        .reduce((sum, line) => sum + line.factoryCount * FACTORY_OUTPUT_BASE.ammunition, 0)
+                      return ammoRate > 0 ? <span className="stockpile-rate">+{ammoRate}/day</span> : null
+                    })()}
                   </div>
                 </div>
               </div>
             </>
+          ) : (
+            <ProductionPanel
+              production={hudState.production}
+              onAddLine={addProductionLine}
+              onDeleteLine={deleteProductionLine}
+              onSetCategory={setProductionLineCategory}
+              onSetFactoryCount={setProductionLineFactoryCount}
+            />
           )}
         </div>
 
@@ -1237,11 +1258,105 @@ function formatIncome(value: number): string {
   return value >= 0 ? `+${value}` : `${value}`
 }
 
-function formatProductionRate(dailyOutput: number): string {
-  if (dailyOutput <= 0) return 'Idle'
-  if (dailyOutput >= 1) return `${dailyOutput}/day`
-  const daysPerUnit = Math.ceil(1 / dailyOutput)
-  return `1 per ${daysPerUnit}d`
+interface ProductionPanelProps {
+  production: PrototypeHudState['production']
+  onAddLine: (category: ProducibleCategory, factoryCount?: number) => void
+  onDeleteLine: (lineId: string) => void
+  onSetCategory: (lineId: string, category: ProducibleCategory) => void
+  onSetFactoryCount: (lineId: string, factoryCount: number) => void
+}
+
+function ProductionPanel({ production, onAddLine, onDeleteLine, onSetCategory, onSetFactoryCount }: ProductionPanelProps) {
+  const [isAdding, setIsAdding] = useState(false)
+  const [newCategory, setNewCategory] = useState<ProducibleCategory>('smallArms')
+
+  const canAddLine = production.totalFactories > 0 && production.usedFactories < production.totalFactories
+
+  return (
+    <div className="production-panel">
+      <div className="factory-usage">
+        <div className="factory-usage-header">
+          <span className="factory-usage-label">Factories</span>
+          <span className={`factory-usage-value ${production.isOverassigned ? 'overassigned' : ''}`}>
+            {production.usedFactories} / {production.totalFactories}
+          </span>
+        </div>
+        <div className="factory-usage-track">
+          <div
+            className={`factory-usage-fill ${production.isOverassigned ? 'overassigned' : ''}`}
+            style={{ width: `${production.totalFactories > 0 ? (production.usedFactories / production.totalFactories) * 100 : 0}%` }}
+          ></div>
+        </div>
+        {production.isOverassigned && (
+          <span className="overassigned-warning">Overassigned! Reallocate or delete lines.</span>
+        )}
+      </div>
+
+      <div className="production-lines">
+        {production.lines.length > 0 ? production.lines.map((line) => {
+          const output = FACTORY_OUTPUT_BASE[line.category] * line.factoryCount
+          return (
+            <div key={line.id} className="production-line-card">
+              <div className="production-line-header">
+                <select
+                  className="production-line-category"
+                  value={line.category}
+                  onChange={(e) => onSetCategory(line.id, e.target.value as ProducibleCategory)}
+                >
+                  {PRODUCIBLE_CATEGORIES.map((cat) => (
+                    <option key={cat} value={cat}>{PRODUCIBLE_LABELS[cat]}</option>
+                  ))}
+                </select>
+                <button className="icon-btn danger" onClick={() => onDeleteLine(line.id)} title="Delete line">
+                  <Trash2 size={14} />
+                </button>
+              </div>
+              <div className="production-line-body">
+                <div className="factory-control">
+                  <span className="factory-control-label">Factories</span>
+                  <div className="factory-stepper">
+                    <button
+                      className="stepper-btn"
+                      disabled={line.factoryCount <= 1}
+                      onClick={() => onSetFactoryCount(line.id, line.factoryCount - 1)}
+                    >-</button>
+                    <span className="stepper-value">{line.factoryCount}</span>
+                    <button
+                      className="stepper-btn"
+                      disabled={line.factoryCount >= MAX_FACTORY_COUNT_PER_LINE || production.usedFactories >= production.totalFactories}
+                      onClick={() => onSetFactoryCount(line.id, line.factoryCount + 1)}
+                    >+</button>
+                  </div>
+                </div>
+                <span className="production-line-output">+{output}/day</span>
+              </div>
+            </div>
+          )
+        }) : (
+          <div className="empty-state compact">
+            {production.totalFactories > 0 ? 'No production lines. Add one below.' : 'Build Military Complexes to start production.'}
+          </div>
+        )}
+      </div>
+
+      {isAdding ? (
+        <div className="add-line-form">
+          <select value={newCategory} onChange={(e) => setNewCategory(e.target.value as ProducibleCategory)}>
+            {PRODUCIBLE_CATEGORIES.map((cat) => (
+              <option key={cat} value={cat}>{PRODUCIBLE_LABELS[cat]}</option>
+            ))}
+          </select>
+          <button className="management-btn small" onClick={() => { onAddLine(newCategory, 1); setIsAdding(false) }}>Add</button>
+          <button className="management-btn small secondary" onClick={() => setIsAdding(false)}>Cancel</button>
+        </div>
+      ) : (
+        <button className="management-btn" disabled={!canAddLine} onClick={() => setIsAdding(true)}>
+          <Plus size={14} />
+          <span>Add Production Line</span>
+        </button>
+      )}
+    </div>
+  )
 }
 
 export default App

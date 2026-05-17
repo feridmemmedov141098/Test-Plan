@@ -4,12 +4,13 @@ import type { ConstructionJob } from './ConstructionTypes'
 import type { TrainingJob } from '../units/DivisionDesignerTypes'
 import {
   EQUIPMENT_CATEGORIES,
-  EQUIPMENT_PRODUCTION_OUTPUT,
+  FACTORY_OUTPUT_BASE,
   addEquipmentStockpiles,
   canAffordEquipment,
   createEmptyEquipmentStockpiles,
   type EquipmentCategory,
   type EquipmentStockpiles,
+  type ProducibleCategory,
   type ProductionLine,
 } from '../equipment/EquipmentTypes'
 
@@ -52,15 +53,15 @@ export class EconomySystem {
 
     for (const economy of Object.values(this.countries)) {
       economy.manpowerPool = economy.stockpiles.manpower
-      economy.equipmentPool += economy.dailyIncome.industry * 5 + economy.dailyIncome.metal * 2
 
       for (const line of economy.productionLines) {
-        economy.equipmentStockpiles[line.category] += EQUIPMENT_PRODUCTION_OUTPUT[line.category]
+        const output = FACTORY_OUTPUT_BASE[line.category] * line.factoryCount
+        if (line.category === 'ammunition') {
+          economy.stockpiles.ammunition += output
+        } else {
+          economy.equipmentStockpiles[line.category] += output
+        }
       }
-
-      // Military complexes produce ammunition from industrial capacity
-      const ammoProduction = Math.floor(economy.dailyIncome.industry * 0.8 + economy.dailyIncome.metal * 0.4)
-      economy.stockpiles.ammunition += ammoProduction
     }
   }
 
@@ -151,28 +152,38 @@ export class EconomySystem {
     this.countries[countryId].equipmentStockpiles[category] += amount
   }
 
-  ensureProductionSlots(countryId: CountryId, slotCount: number): void {
+  getTotalAssignedFactories(countryId: CountryId): number {
+    return this.countries[countryId].productionLines.reduce((sum, line) => sum + line.factoryCount, 0)
+  }
+
+  addProductionLine(countryId: CountryId, category: ProducibleCategory, factoryCount = 1): ProductionLine {
     const country = this.countries[countryId]
-
-    while (country.productionLines.length < slotCount) {
-      const category = country.productionLines.length === 0 ? 'smallArms' : country.productionLines.length === 1 ? 'supplyTrucks' : EQUIPMENT_CATEGORIES[country.productionLines.length % EQUIPMENT_CATEGORIES.length]
-      country.productionLines.push({
-        id: `${countryId}-line-${country.productionLines.length + 1}`,
-        countryId,
-        category,
-      })
+    const line: ProductionLine = {
+      id: `${countryId}-line-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      countryId,
+      category,
+      factoryCount,
     }
+    country.productionLines.push(line)
+    return line
+  }
 
-    if (country.productionLines.length > slotCount) {
-      country.productionLines = country.productionLines.slice(0, slotCount)
+  deleteProductionLine(countryId: CountryId, lineId: string): void {
+    const country = this.countries[countryId]
+    country.productionLines = country.productionLines.filter((line) => line.id !== lineId)
+  }
+
+  setProductionLineCategory(countryId: CountryId, lineId: string, category: ProducibleCategory): void {
+    const line = this.countries[countryId].productionLines.find((candidate) => candidate.id === lineId)
+    if (line) {
+      line.category = category
     }
   }
 
-  setProductionLine(countryId: CountryId, lineId: string, category: EquipmentCategory): void {
+  setProductionLineFactoryCount(countryId: CountryId, lineId: string, factoryCount: number): void {
     const line = this.countries[countryId].productionLines.find((candidate) => candidate.id === lineId)
-
     if (line) {
-      line.category = category
+      line.factoryCount = Math.max(1, factoryCount)
     }
   }
 

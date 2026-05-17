@@ -70,6 +70,28 @@ export class ProvinceMapRenderer {
       mesh.receiveShadow = true
       mesh.frustumCulled = false
       preserveGlbMaterial(mesh)
+
+      // Center geometry so local origin = geometric center (pivot point)
+      mesh.updateMatrixWorld()
+      const worldBox = new THREE.Box3().setFromObject(mesh)
+      const worldCenter = new THREE.Vector3()
+      worldBox.getCenter(worldCenter)
+
+      mesh.geometry.computeBoundingBox()
+      const localCenter = new THREE.Vector3()
+      mesh.geometry.boundingBox!.getCenter(localCenter)
+      mesh.geometry.translate(-localCenter.x, -localCenter.y, -localCenter.z)
+
+      // Detach from GLB parent and add directly to source root
+      // so position is in source-local space (scale * position = world position)
+      mesh.removeFromParent()
+      source.add(mesh)
+
+      // Position mesh so its pivot (now at geometric center) is at the old visual center
+      mesh.position.copy(worldCenter).divideScalar(scale)
+      mesh.rotation.set(0, 0, 0)
+      mesh.scale.set(1, 1, 1)
+
       canonical.set(baseName, mesh)
     }
 

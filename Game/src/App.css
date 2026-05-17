@@ -588,6 +588,8 @@
 .construction-panel {
   grid-column: 1;
   grid-row: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .training-panel {
@@ -2056,4 +2058,206 @@
     min-width: 280px;
     flex-shrink: 0;
   }
+}
+
+/* ===== PRODUCTION PANEL ===== */
+.production-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.factory-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+}
+
+.factory-usage-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.factory-usage-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #a8a49a;
+}
+
+.factory-usage-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e8e4d9;
+}
+
+.factory-usage-value.overassigned {
+  color: #ff6b6b;
+}
+
+.factory-usage-track {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.factory-usage-fill {
+  height: 100%;
+  background: #5a8c5a;
+  border-radius: 3px;
+  transition: width 0.2s ease;
+}
+
+.factory-usage-fill.overassigned {
+  background: #ff6b6b;
+}
+
+.overassigned-warning {
+  font-size: 11px;
+  color: #ff6b6b;
+  font-weight: 500;
+}
+
+.production-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.production-line-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.production-line-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.production-line-category {
+  flex: 1;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 12px;
+  color: #e8e4d9;
+  cursor: pointer;
+}
+
+.production-line-body {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.factory-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.factory-control-label {
+  font-size: 11px;
+  color: #888;
+  text-transform: uppercase;
+}
+
+.factory-stepper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.stepper-btn {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #3a3a3a;
+  border: 1px solid #555;
+  border-radius: 4px;
+  color: #e8e4d9;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.stepper-btn:hover:not(:disabled) {
+  background: #4a4a4a;
+}
+
+.stepper-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.stepper-value {
+  min-width: 20px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #e8e4d9;
+}
+
+.production-line-output {
+  font-size: 12px;
+  font-weight: 600;
+  color: #5a8c5a;
+}
+
+.add-line-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+}
+
+.add-line-form select {
+  flex: 1;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 4px;
+  padding: 5px 6px;
+  font-size: 12px;
+  color: #e8e4d9;
+}
+
+.management-btn.small {
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+.management-btn.secondary {
+  background: #3a3a3a;
+  border-color: #555;
+  color: #a8a49a;
+}
+
+.management-btn.secondary:hover {
+  background: #4a4a4a;
+}
+
+.icon-btn.danger {
+  color: #ff6b6b;
+}
+
+.icon-btn.danger:hover {
+  background: rgba(255, 107, 107, 0.15);
 }

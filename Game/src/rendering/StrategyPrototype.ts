@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { CombatSystem, type CombatInstance } from '../game/combat/CombatSystem'
 import type { BattleProjection } from '../game/combat/CombatSimulator'
-import { EQUIPMENT_CATEGORIES, EQUIPMENT_PRODUCTION_OUTPUT, type EquipmentCategory, type EquipmentStockpiles } from '../game/equipment/EquipmentTypes'
+import { EQUIPMENT_CATEGORIES, EQUIPMENT_PRODUCTION_OUTPUT, type EquipmentCategory, type EquipmentStockpiles, type ProducibleCategory, type ProductionLine } from '../game/equipment/EquipmentTypes'
 import {
   BUILDING_DEFINITIONS,
   MAX_ACTIVE_CONSTRUCTION_JOBS,
@@ -114,6 +114,12 @@ export interface PrototypeHudState {
     food: number
     productionRates: Record<EquipmentCategory, number>
   }
+  production: {
+    lines: ProductionLine[]
+    totalFactories: number
+    usedFactories: number
+    isOverassigned: boolean
+  }
   activeCombat: CombatInstance | null
   activeCombats: ActiveCombatOverlay[]
   battleForecast: BattleProjection | null
@@ -185,7 +191,6 @@ const BASE_CAMERA_HEIGHT = 190
 const UNIT_Y = 2.2
 const SIM_HOURS_PER_SECOND = 6
 const PLAYER_COUNTRY_ID: CountryId = 'azerbaijan'
-const MILITARY_COMPLEX_DAILY_EQUIPMENT = 25
 const TRAINING_REFUND_MULTIPLIER = 0.5
 const MOVEMENT_SPEED_MULTIPLIER = 0.2
 const FORTIFICATION_DAYS_TO_MAX = 7
@@ -303,6 +308,12 @@ export class StrategyPrototype {
           food: 0,
           productionRates: {} as Record<EquipmentCategory, number>,
         },
+        production: {
+          lines: [],
+          totalFactories: 0,
+          usedFactories: 0,
+          isOverassigned: false,
+        },
         time: { day: 1, hour: 0, speed: 1 },
         status: 'Loading province map',
         mapStats: null,
@@ -330,8 +341,6 @@ export class StrategyPrototype {
       this.initializeDivisionTemplates()
       this.initializeStartingBuildings()
       this.refreshBuildingVisuals()
-      this.economySystem.ensureProductionSlots(PLAYER_COUNTRY_ID, this.getPlayerBuildingCounts().militaryComplex)
-      this.economySystem.ensureProductionSlots('armenia', this.getBuildingCountsForCountry('armenia').militaryComplex)
       this.createSelectionMeshes()
       this.createUnits()
       this.economySystem.tickDaily(this.provinceState.provinces)
@@ -371,6 +380,12 @@ export class StrategyPrototype {
           ammunition: 0,
           food: 0,
           productionRates: {} as Record<EquipmentCategory, number>,
+        },
+        production: {
+          lines: [],
+          totalFactories: 0,
+          usedFactories: 0,
+          isOverassigned: false,
         },
         time: { day: this.currentDay, hour: this.currentHour, speed: this.timeSpeed },
         status: error instanceof Error ? error.message : 'Province map failed to load',
@@ -629,8 +644,7 @@ export class StrategyPrototype {
 
     if (
       !this.economySystem.canAfford(PLAYER_COUNTRY_ID, resourceCost) ||
-      !this.economySystem.canAffordEquipment(PLAYER_COUNTRY_ID, template.stats.equipmentRequirements) ||
-      economy.equipmentPool < template.stats.equipment * 0.25
+      !this.economySystem.canAffordEquipment(PLAYER_COUNTRY_ID, template.stats.equipmentRequirements)
     ) {
       this.updateHud('Not enough manpower, equipment, or resources')
       return
@@ -638,7 +652,6 @@ export class StrategyPrototype {
 
     this.economySystem.spendResources(PLAYER_COUNTRY_ID, resourceCost)
     this.economySystem.spendEquipmentStockpiles(PLAYER_COUNTRY_ID, template.stats.equipmentRequirements)
-    economy.equipmentPool -= template.stats.equipment * 0.25
     economy.trainingQueue.push({
       id: `train-${this.nextTrainingJobId++}`,
       countryId: PLAYER_COUNTRY_ID,
@@ -666,13 +679,34 @@ export class StrategyPrototype {
     economy.trainingQueue = economy.trainingQueue.filter((candidate) => candidate.id !== jobId)
     this.economySystem.refundResources(PLAYER_COUNTRY_ID, { ...job.stats.resourceCost, manpower: job.stats.manpower }, TRAINING_REFUND_MULTIPLIER)
     this.economySystem.refundEquipmentStockpiles(PLAYER_COUNTRY_ID, job.stats.equipmentRequirements, TRAINING_REFUND_MULTIPLIER)
-    economy.equipmentPool += job.stats.equipment * 0.25 * TRAINING_REFUND_MULTIPLIER
     this.updateHud('Training cancelled')
   }
 
-  setProductionLine(lineId: string, category: EquipmentCategory): void {
-    this.economySystem.setProductionLine(PLAYER_COUNTRY_ID, lineId, category)
+  addProductionLine(category: ProducibleCategory, factoryCount = 1): void {
+    const totalFactories = this.getPlayerBuildingCounts().militaryComplex
+    const usedFactories = this.economySystem.getTotalAssignedFactories(PLAYER_COUNTRY_ID)
+    if (usedFactories >= totalFactories) {
+      this.updateHud('No free military complexes available')
+      return
+    }
+    const clampedCount = Math.min(factoryCount, totalFactories - usedFactories)
+    this.economySystem.addProductionLine(PLAYER_COUNTRY_ID, category, clampedCount)
+    this.updateHud('Production line added')
+  }
+
+  deleteProductionLine(lineId: string): void {
+    this.economySystem.deleteProductionLine(PLAYER_COUNTRY_ID, lineId)
+    this.updateHud('Production line removed')
+  }
+
+  setProductionLineCategory(lineId: string, category: ProducibleCategory): void {
+    this.economySystem.setProductionLineCategory(PLAYER_COUNTRY_ID, lineId, category)
     this.updateHud('Production line updated')
+  }
+
+  setProductionLineFactoryCount(lineId: string, factoryCount: number): void {
+    this.economySystem.setProductionLineFactoryCount(PLAYER_COUNTRY_ID, lineId, factoryCount)
+    this.updateHud('Factory allocation updated')
   }
 
   saveDivisionTemplate(draft: { id?: string; name: string; nodes: DivisionNode[] }): void {
@@ -1854,10 +1888,6 @@ export class StrategyPrototype {
     }
 
     const economy = this.economySystem.countries[PLAYER_COUNTRY_ID]
-    const buildings = this.getPlayerBuildingCounts()
-    this.economySystem.ensureProductionSlots(PLAYER_COUNTRY_ID, buildings.militaryComplex)
-    this.economySystem.ensureProductionSlots('armenia', this.getBuildingCountsForCountry('armenia').militaryComplex)
-    this.economySystem.addEquipment(PLAYER_COUNTRY_ID, buildings.militaryComplex * MILITARY_COMPLEX_DAILY_EQUIPMENT)
     this.absorbSupplyTruckStockpiles()
 
     for (const job of [...economy.constructionQueue]) {
@@ -2248,9 +2278,17 @@ export class StrategyPrototype {
         productionRates: Object.fromEntries(
           EQUIPMENT_CATEGORIES.map((category) => [
             category,
-            playerEconomy.productionLines.filter((line) => line.category === category).length * EQUIPMENT_PRODUCTION_OUTPUT[category],
+            playerEconomy.productionLines
+              .filter((line) => line.category === category)
+              .reduce((sum, line) => sum + line.factoryCount * EQUIPMENT_PRODUCTION_OUTPUT[category], 0),
           ])
         ) as Record<EquipmentCategory, number>,
+      },
+      production: {
+        lines: playerEconomy.productionLines,
+        totalFactories: playerBuildings.militaryComplex,
+        usedFactories: this.economySystem.getTotalAssignedFactories(PLAYER_COUNTRY_ID),
+        isOverassigned: this.economySystem.getTotalAssignedFactories(PLAYER_COUNTRY_ID) > playerBuildings.militaryComplex,
       },
       activeCombat,
       activeCombats,
