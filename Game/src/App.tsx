@@ -249,7 +249,7 @@ function App() {
               <span>Stock</span>
             </button>
           </div>
-          <div className="panel-tab-content">
+          <div key={activeTab} className="panel-tab-content">
           {activeTab === 'construction' ? (
             <>
               <div className="building-summary">
