@@ -218,7 +218,7 @@ function createCountryEconomy(startingManpower: number, startingIndustry: number
   equipmentStockpiles.tanks = Math.round(startingIndustry * 0.2)
   equipmentStockpiles.apcIfv = Math.round(startingIndustry * 0.28)
   equipmentStockpiles.supportVehicles = Math.round(startingIndustry * 0.8)
-  equipmentStockpiles.supplyTrucks = 3
+  equipmentStockpiles.supplyTrucks = 8
 
   return {
     stockpiles,
