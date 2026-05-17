@@ -212,7 +212,7 @@ function createCountryEconomy(startingManpower: number, startingIndustry: number
   stockpiles.industry = startingIndustry
   stockpiles.money = startingIndustry * 10
   stockpiles.ammunition = startingIndustry * 4
-  equipmentStockpiles.smallArms = startingIndustry * 3
+  equipmentStockpiles.smallArms = startingIndustry * 8
   equipmentStockpiles.antiTankWeapons = Math.round(startingIndustry * 0.35)
   equipmentStockpiles.artillery = Math.round(startingIndustry * 0.25)
   equipmentStockpiles.tanks = Math.round(startingIndustry * 0.2)
