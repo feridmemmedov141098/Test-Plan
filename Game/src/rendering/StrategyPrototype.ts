@@ -1,4 +1,6 @@
 import * as THREE from 'three'
+import { AIController } from '../game/ai/AIController'
+import type { AIActions, AIContext } from '../game/ai/AITypes'
 import { CombatSystem, type CombatInstance } from '../game/combat/CombatSystem'
 import type { BattleProjection } from '../game/combat/CombatSimulator'
 import { EQUIPMENT_CATEGORIES, EQUIPMENT_PRODUCTION_OUTPUT, type EquipmentCategory, type EquipmentStockpiles, type ProducibleCategory, type ProductionLine } from '../game/equipment/EquipmentTypes'
@@ -191,6 +193,7 @@ const BASE_CAMERA_HEIGHT = 190
 const UNIT_Y = 2.2
 const SIM_HOURS_PER_SECOND = 6
 const PLAYER_COUNTRY_ID: CountryId = 'azerbaijan'
+const AI_COUNTRY_IDS: CountryId[] = ['armenia']
 const TRAINING_REFUND_MULTIPLIER = 0.5
 const MOVEMENT_SPEED_MULTIPLIER = 0.2
 const FORTIFICATION_DAYS_TO_MAX = 7
@@ -220,6 +223,7 @@ export class StrategyPrototype {
   private readonly unitFactory = new UnitModelFactory()
   private readonly economySystem = new EconomySystem()
   private readonly combatSystem = new CombatSystem()
+  private readonly aiController = new AIController(AI_COUNTRY_IDS)
   private readonly divisionTemplates = new Map<string, DivisionTemplate>()
   private readonly units: UnitState[] = []
   private readonly unitGroups = new Map<string, THREE.Group>()
@@ -560,37 +564,41 @@ export class StrategyPrototype {
   }
 
   queueConstruction(provinceId: number, buildingType: BuildingType): void {
+    this.queueConstructionForCountry(PLAYER_COUNTRY_ID, provinceId, buildingType)
+  }
+
+  private queueConstructionForCountry(countryId: CountryId, provinceId: number, buildingType: BuildingType, silent = false): boolean {
     if (this.isDisposed || !this.provinceState) {
-      return
+      return false
     }
 
     const province = this.provinceState.getProvince(provinceId)
-    const economy = this.economySystem.countries[PLAYER_COUNTRY_ID]
+    const economy = this.economySystem.countries[countryId]
     const definition = BUILDING_DEFINITIONS[buildingType]
 
-    if (!this.isPlayerControlledProvince(province) || province.isContested) {
-      this.updateHud('Construction requires controlled, stable province')
-      return
+    if (province.controllerCountryId !== countryId || province.isContested) {
+      if (!silent) this.updateHud('Construction requires controlled, stable province')
+      return false
     }
 
     if (economy.constructionQueue.length >= MAX_ACTIVE_CONSTRUCTION_JOBS) {
-      this.updateHud('Construction queue is full')
-      return
+      if (!silent) this.updateHud('Construction queue is full')
+      return false
     }
 
-    if (this.getProjectedBuildingCount(province, buildingType) >= definition.maxPerProvince) {
-      this.updateHud(`${definition.name} limit reached here`)
-      return
+    if (this.getProjectedBuildingCountForCountry(countryId, province, buildingType) >= definition.maxPerProvince) {
+      if (!silent) this.updateHud(`${definition.name} limit reached here`)
+      return false
     }
 
-    if (!this.economySystem.spendResources(PLAYER_COUNTRY_ID, definition.cost)) {
-      this.updateHud('Not enough resources')
-      return
+    if (!this.economySystem.spendResources(countryId, definition.cost)) {
+      if (!silent) this.updateHud('Not enough resources')
+      return false
     }
 
     economy.constructionQueue.push({
       id: `build-${this.nextConstructionJobId++}`,
-      countryId: PLAYER_COUNTRY_ID,
+      countryId,
       provinceId,
       provinceName: province.displayName,
       buildingType,
@@ -599,7 +607,8 @@ export class StrategyPrototype {
       totalDays: definition.buildDays,
       daysRemaining: definition.buildDays,
     })
-    this.updateHud(`${definition.name} queued`)
+    if (!silent) this.updateHud(`${definition.name} queued`)
+    return true
   }
 
   cancelConstruction(jobId: string): void {
@@ -616,45 +625,49 @@ export class StrategyPrototype {
   }
 
   queueDivisionTraining(templateId: string, provinceId: number): void {
+    this.queueDivisionTrainingForCountry(PLAYER_COUNTRY_ID, templateId, provinceId)
+  }
+
+  private queueDivisionTrainingForCountry(countryId: CountryId, templateId: string, provinceId: number, silent = false): boolean {
     if (this.isDisposed || !this.provinceState) {
-      return
+      return false
     }
 
     const template = this.divisionTemplates.get(templateId)
     const province = this.provinceState.getProvince(provinceId)
-    const economy = this.economySystem.countries[PLAYER_COUNTRY_ID]
+    const economy = this.economySystem.countries[countryId]
     const activeTrainingCount = economy.trainingQueue.filter((job) => job.status === 'training').length
 
     if (!template || template.nodes.length === 0) {
-      this.updateHud('Select a valid division template')
-      return
+      if (!silent) this.updateHud('Select a valid division template')
+      return false
     }
 
-    if (activeTrainingCount >= this.getPlayerBuildingCounts().barracks) {
-      this.updateHud('No free barracks training slot')
-      return
+    if (activeTrainingCount >= this.getBuildingCountsForCountry(countryId).barracks) {
+      if (!silent) this.updateHud('No free barracks training slot')
+      return false
     }
 
-    if (!this.isValidDeploymentProvince(province)) {
-      this.updateHud('Deployment requires controlled barracks')
-      return
+    if (!this.isValidDeploymentProvinceForCountry(countryId, province)) {
+      if (!silent) this.updateHud('Deployment requires controlled barracks')
+      return false
     }
 
     const resourceCost = { ...template.stats.resourceCost, manpower: template.stats.manpower }
 
     if (
-      !this.economySystem.canAfford(PLAYER_COUNTRY_ID, resourceCost) ||
-      !this.economySystem.canAffordEquipment(PLAYER_COUNTRY_ID, template.stats.equipmentRequirements)
+      !this.economySystem.canAfford(countryId, resourceCost) ||
+      !this.economySystem.canAffordEquipment(countryId, template.stats.equipmentRequirements)
     ) {
-      this.updateHud('Not enough manpower, equipment, or resources')
-      return
+      if (!silent) this.updateHud('Not enough manpower, equipment, or resources')
+      return false
     }
 
-    this.economySystem.spendResources(PLAYER_COUNTRY_ID, resourceCost)
-    this.economySystem.spendEquipmentStockpiles(PLAYER_COUNTRY_ID, template.stats.equipmentRequirements)
+    this.economySystem.spendResources(countryId, resourceCost)
+    this.economySystem.spendEquipmentStockpiles(countryId, template.stats.equipmentRequirements)
     economy.trainingQueue.push({
       id: `train-${this.nextTrainingJobId++}`,
-      countryId: PLAYER_COUNTRY_ID,
+      countryId,
       provinceId,
       provinceName: province.displayName,
       templateId,
@@ -665,7 +678,8 @@ export class StrategyPrototype {
       daysRemaining: template.stats.trainingDays,
       status: 'training',
     })
-    this.updateHud(`${template.name} training`)
+    if (!silent) this.updateHud(`${template.name} training`)
+    return true
   }
 
   cancelTraining(jobId: string): void {
@@ -707,6 +721,23 @@ export class StrategyPrototype {
   setProductionLineFactoryCount(lineId: string, factoryCount: number): void {
     this.economySystem.setProductionLineFactoryCount(PLAYER_COUNTRY_ID, lineId, factoryCount)
     this.updateHud('Factory allocation updated')
+  }
+
+  private setProductionPlanForCountry(countryId: CountryId, allocations: Partial<Record<ProducibleCategory, number>>): void {
+    const economy = this.economySystem.countries[countryId]
+    const totalFactories = this.getBuildingCountsForCountry(countryId).militaryComplex
+    let remaining = totalFactories
+    economy.productionLines = []
+
+    for (const [category, requestedCount] of Object.entries(allocations) as Array<[ProducibleCategory, number | undefined]>) {
+      if (!requestedCount || remaining <= 0) {
+        continue
+      }
+
+      const factoryCount = Math.min(remaining, Math.max(1, Math.floor(requestedCount)))
+      this.economySystem.addProductionLine(countryId, category, factoryCount)
+      remaining -= factoryCount
+    }
   }
 
   saveDivisionTemplate(draft: { id?: string; name: string; nodes: DivisionNode[] }): void {
@@ -969,27 +1000,9 @@ export class StrategyPrototype {
 
     if (targetProvince) {
       for (const unit of this.getSelectedUnits()) {
-        if (unit.manpower <= 0 || unit.status === 'inCombat') {
-          continue
+        if (this.issueMoveOrderForUnit(unit, targetProvince.id)) {
+          issuedOrders += 1
         }
-
-        if (targetProvince.controllerCountryId !== unit.countryId && !areAtWar(unit.countryId, targetProvince.controllerCountryId)) {
-          continue
-        }
-
-        const path = this.pathfinding.findPath(unit.provinceId, targetProvince.id)
-
-        if (path.length === 0) {
-          continue
-        }
-
-        unit.routeProvinceIds = path
-        unit.route = path.map((provinceId) => this.provinceState!.getProvince(provinceId).centerWorld.clone().setY(UNIT_Y))
-        unit.routeIndex = 0
-        unit.status = 'moving'
-        unit.fortificationDays = 0
-        unit.fortifiedProvinceId = null
-        issuedOrders += 1
       }
     }
 
@@ -1004,6 +1017,37 @@ export class StrategyPrototype {
     }
 
     this.updateHud(issuedOrders > 1 ? `Move order issued to ${issuedOrders} units` : 'Move order issued')
+  }
+
+  private issueMoveOrderForUnit(unit: UnitState, targetProvinceId: number): boolean {
+    if (!this.provinceState || !this.pathfinding || unit.manpower <= 0 || unit.status === 'inCombat') {
+      return false
+    }
+
+    const targetProvince = this.provinceState.getProvince(targetProvinceId)
+
+    if (targetProvince.controllerCountryId !== unit.countryId && !areAtWar(unit.countryId, targetProvince.controllerCountryId)) {
+      return false
+    }
+
+    const path = this.pathfinding.findPath(unit.provinceId, targetProvince.id)
+
+    if (path.length === 0) {
+      return false
+    }
+
+    unit.routeProvinceIds = path
+    unit.route = path.map((provinceId) => this.provinceState!.getProvince(provinceId).centerWorld.clone().setY(UNIT_Y))
+    unit.routeIndex = 0
+    unit.status = 'moving'
+    unit.fortificationDays = 0
+    unit.fortifiedProvinceId = null
+    return true
+  }
+
+  private issueMoveOrder(unitId: string, targetProvinceId: number): boolean {
+    const unit = this.units.find((candidate) => candidate.id === unitId)
+    return unit ? this.issueMoveOrderForUnit(unit, targetProvinceId) : false
   }
 
   private pickUnit(event: PointerEvent): string | null {
@@ -1216,6 +1260,7 @@ export class StrategyPrototype {
       this.updateSupplyState()
       this.dispatchSupplyVehicles()
       this.spawnCombatEffects()
+      this.updateAI()
 
       const resolutions = this.combatSystem.tickHourly(this.provinceState.provinces, this.units, this.economySystem)
 
@@ -1229,13 +1274,43 @@ export class StrategyPrototype {
         this.currentHour = 0
         this.currentDay += 1
         this.economySystem.tickDaily(this.provinceState.provinces)
-        this.updatePlayerProductionAndQueues()
+        this.updateAllProductionAndQueues()
       }
     }
 
     if (hoursProcessed > 0) {
       this.syncUnitVisuals()
     }
+  }
+
+  private updateAI(): void {
+    if (!this.provinceState || !this.pathfinding) {
+      return
+    }
+
+    const context: AIContext = {
+      currentDay: this.currentDay,
+      currentHour: this.currentHour,
+      playerCountryId: PLAYER_COUNTRY_ID,
+      provinces: this.provinceState.provinces,
+      units: this.units,
+      economies: this.economySystem.countries,
+      templates: this.divisionTemplates,
+      pathfinding: this.pathfinding,
+      combatSystem: this.combatSystem,
+    }
+    const actions: AIActions = {
+      getBuildingCounts: (countryId) => this.getBuildingCountsForCountry(countryId),
+      getValidConstructionProvinces: (countryId) => this.getValidConstructionProvincesForCountry(countryId),
+      getValidDeploymentProvinces: (countryId) => this.getValidDeploymentProvincesForCountry(countryId),
+      getProjectedBuildingCount: (countryId, province, buildingType) => this.getProjectedBuildingCountForCountry(countryId, province, buildingType),
+      queueConstruction: (countryId, provinceId, buildingType) => this.queueConstructionForCountry(countryId, provinceId, buildingType, true),
+      queueTraining: (countryId, templateId, provinceId) => this.queueDivisionTrainingForCountry(countryId, templateId, provinceId, true),
+      issueMoveOrder: (unitId, targetProvinceId) => this.issueMoveOrder(unitId, targetProvinceId),
+      setProductionPlan: (countryId, allocations) => this.setProductionPlanForCountry(countryId, allocations),
+    }
+
+    this.aiController.tick(context, actions)
   }
 
   private updateFortifications(): void {
@@ -1882,13 +1957,26 @@ export class StrategyPrototype {
     }
   }
 
-  private updatePlayerProductionAndQueues(): void {
+  private updateAllProductionAndQueues(): void {
     if (!this.provinceState) {
       return
     }
 
-    const economy = this.economySystem.countries[PLAYER_COUNTRY_ID]
     this.absorbSupplyTruckStockpiles()
+
+    for (const countryId of Object.keys(this.economySystem.countries) as CountryId[]) {
+      this.updateProductionAndQueuesForCountry(countryId)
+    }
+
+    this.refreshBuildingVisuals()
+  }
+
+  private updateProductionAndQueuesForCountry(countryId: CountryId): void {
+    if (!this.provinceState) {
+      return
+    }
+
+    const economy = this.economySystem.countries[countryId]
 
     for (const job of [...economy.constructionQueue]) {
       job.daysRemaining = Math.max(0, job.daysRemaining - 1)
@@ -1899,13 +1987,11 @@ export class StrategyPrototype {
 
       const province = this.provinceState.getProvince(job.provinceId)
 
-      if (this.isPlayerControlledProvince(province)) {
+      if (province.controllerCountryId === countryId && !province.isContested) {
         province.buildings[job.buildingType] += 1
         economy.constructionQueue = economy.constructionQueue.filter((candidate) => candidate.id !== job.id)
       }
     }
-
-    this.refreshBuildingVisuals()
 
     for (const job of economy.trainingQueue) {
       if (job.status === 'training') {
@@ -1919,26 +2005,26 @@ export class StrategyPrototype {
 
     for (const job of [...economy.trainingQueue].filter((candidate) => candidate.status === 'ready')) {
       const preferredProvince = this.provinceState.getProvince(job.provinceId)
-      const deploymentProvince = this.isValidDeploymentProvince(preferredProvince) ? preferredProvince : this.getValidDeploymentProvinces()[0]
+      const deploymentProvince = this.isValidDeploymentProvinceForCountry(countryId, preferredProvince) ? preferredProvince : this.getValidDeploymentProvincesForCountry(countryId)[0]
 
       if (!deploymentProvince) {
         continue
       }
 
-      this.deployTrainingJob(job, deploymentProvince)
+      this.deployTrainingJobForCountry(countryId, job, deploymentProvince)
       economy.trainingQueue = economy.trainingQueue.filter((candidate) => candidate.id !== job.id)
     }
   }
 
-  private deployTrainingJob(job: TrainingJob, province: Province): void {
-    const id = `az-trained-${this.nextUnitSerial++}`
+  private deployTrainingJobForCountry(countryId: CountryId, job: TrainingJob, province: Province): void {
+    const id = `${countryId}-trained-${this.nextUnitSerial++}`
     const combatFields = buildUnitCombatFields(id, job.templateId, job.templateName, job.nodes, job.stats)
     const unit: UnitState = {
       id,
       name: job.templateName,
       ...combatFields,
-      countryId: PLAYER_COUNTRY_ID,
-      owner: COUNTRY_NAMES[PLAYER_COUNTRY_ID],
+      countryId,
+      owner: COUNTRY_NAMES[countryId],
       provinceId: province.id,
       position: province.centerWorld.clone().setY(UNIT_Y),
       route: [],
@@ -1957,7 +2043,7 @@ export class StrategyPrototype {
       status: 'idle',
       reinforcementDelayHours: 0,
     }
-    const group = this.unitFactory.create(COUNTRY_COLORS[PLAYER_COUNTRY_ID])
+    const group = this.unitFactory.create(COUNTRY_COLORS[countryId])
     group.position.copy(unit.position)
     group.userData.unitId = id
     group.traverse((object) => {
@@ -1970,7 +2056,9 @@ export class StrategyPrototype {
     this.units.push(unit)
     this.unitGroups.set(id, group)
     this.scene.add(group)
-    this.updateHud(`${job.templateName} deployed`)
+    if (countryId === PLAYER_COUNTRY_ID) {
+      this.updateHud(`${job.templateName} deployed`)
+    }
   }
 
   private getPlayerBuildingCounts(): { barracks: number; militaryComplex: number } {
@@ -1994,27 +2082,35 @@ export class StrategyPrototype {
   }
 
   private getValidConstructionProvinces(): Province[] {
+    return this.getValidConstructionProvincesForCountry(PLAYER_COUNTRY_ID)
+  }
+
+  private getValidConstructionProvincesForCountry(countryId: CountryId): Province[] {
     if (!this.provinceState) {
       return []
     }
 
-    return this.provinceState.provinces.filter((province) => this.isPlayerControlledProvince(province) && !province.isContested)
+    return this.provinceState.provinces.filter((province) => province.controllerCountryId === countryId && !province.isContested)
   }
 
   private getValidDeploymentProvinces(): Province[] {
-    return this.getValidConstructionProvinces().filter((province) => province.buildings.barracks > 0)
+    return this.getValidDeploymentProvincesForCountry(PLAYER_COUNTRY_ID)
+  }
+
+  private getValidDeploymentProvincesForCountry(countryId: CountryId): Province[] {
+    return this.getValidConstructionProvincesForCountry(countryId).filter((province) => province.buildings.barracks > 0)
   }
 
   private isValidDeploymentProvince(province: Province): boolean {
-    return this.isPlayerControlledProvince(province) && !province.isContested && province.buildings.barracks > 0
+    return this.isValidDeploymentProvinceForCountry(PLAYER_COUNTRY_ID, province)
   }
 
-  private isPlayerControlledProvince(province: Province): boolean {
-    return province.controllerCountryId === PLAYER_COUNTRY_ID
+  private isValidDeploymentProvinceForCountry(countryId: CountryId, province: Province): boolean {
+    return province.controllerCountryId === countryId && !province.isContested && province.buildings.barracks > 0
   }
 
-  private getProjectedBuildingCount(province: Province, buildingType: BuildingType): number {
-    const queued = this.economySystem.countries[PLAYER_COUNTRY_ID].constructionQueue.filter(
+  private getProjectedBuildingCountForCountry(countryId: CountryId, province: Province, buildingType: BuildingType): number {
+    const queued = this.economySystem.countries[countryId].constructionQueue.filter(
       (job) => job.provinceId === province.id && job.buildingType === buildingType,
     ).length
 
