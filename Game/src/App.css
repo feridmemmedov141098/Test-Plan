@@ -620,6 +620,110 @@
   width: min(420px, 100%);
 }
 
+/* Collapsible left panel */
+.construction-panel {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  overflow: hidden;
+  transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  width: 44px;
+  padding: 8px 4px;
+}
+
+.construction-panel.open {
+  width: 300px;
+  padding: 12px;
+}
+
+.construction-panel.collapsed .panel-tab-sidebar {
+  padding: 0;
+  border: none;
+}
+
+.construction-panel.collapsed .panel-tab-sidebar .panel-tab span {
+  display: none;
+}
+
+.construction-panel.collapsed .panel-tab-sidebar .panel-tab {
+  padding: 8px 2px;
+}
+
+.panel-tab-content {
+  opacity: 0;
+  width: 0;
+  padding: 0;
+  overflow: hidden;
+  flex-shrink: 0;
+  transition: opacity 0.25s ease, width 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  pointer-events: none;
+}
+
+.panel-tab-content.visible {
+  opacity: 1;
+  width: 240px;
+  padding: 0 0 0 8px;
+  overflow-y: auto;
+  pointer-events: auto;
+}
+
+.panel-tab.collapse-toggle {
+  margin-top: auto;
+  border-style: dashed;
+  opacity: 0.7;
+}
+
+.panel-tab.collapse-toggle:hover {
+  opacity: 1;
+}
+
+/* Collapsible right panel */
+.panel-toggle-right {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 44px;
+  padding: 10px 4px;
+  background: linear-gradient(135deg, rgba(20, 24, 18, 0.92) 0%, rgba(15, 18, 14, 0.95) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  backdrop-filter: blur(16px);
+  color: #e8e4d9;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  pointer-events: auto;
+}
+
+.panel-toggle-right:hover {
+  border-color: rgba(247, 223, 114, 0.3);
+  color: #f7df72;
+  transform: scale(1.05);
+}
+
+.training-panel {
+  grid-column: 3;
+  grid-row: 1 / 4;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 300px;
+  opacity: 1;
+  transform: translateX(0);
+  transition: opacity 0.3s ease, transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.3s ease;
+}
+
+.training-panel.open {
+  opacity: 1;
+  transform: translateX(0);
+}
+
 .combat-section {
   grid-column: 2;
   grid-row: 3;
@@ -2126,6 +2230,25 @@
   .construction-panel {
     flex-direction: row;
     min-width: 320px;
+    width: auto !important;
+    padding: 10px !important;
+  }
+
+  .panel-tab-content {
+    opacity: 1 !important;
+    width: auto !important;
+    padding: 0 0 0 8px !important;
+    overflow-y: auto !important;
+    pointer-events: auto !important;
+  }
+
+  .panel-toggle-right {
+    display: none;
+  }
+
+  .training-panel {
+    min-width: 280px;
+    width: auto !important;
   }
 }
 

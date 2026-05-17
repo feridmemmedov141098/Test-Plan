@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Banknote, Bomb, Edit3, Factory, Flame, Fuel, Hammer, Handshake, MapPin, PencilRuler, Pickaxe, Plus, Save, Shield, Swords, Trash2, User, Users, Wheat, X, Zap } from 'lucide-react'
+import { Banknote, Bomb, ChevronLeft, ChevronRight, Edit3, Factory, Flame, Fuel, Hammer, Handshake, MapPin, PencilRuler, Pickaxe, Plus, Save, Shield, Swords, Trash2, User, Users, Wheat, X, Zap } from 'lucide-react'
 import './App.css'
 import { EQUIPMENT_CATEGORIES, EQUIPMENT_LABELS, FACTORY_OUTPUT_BASE, MAX_FACTORY_COUNT_PER_LINE, PRODUCIBLE_CATEGORIES, PRODUCIBLE_LABELS, type EquipmentCategory, type ProducibleCategory } from './game/equipment/EquipmentTypes'
 import { AI_WAR_DAYS_REQUIRED } from './game/diplomacy/DiplomacyTypes'
@@ -221,6 +221,8 @@ function App() {
     setDeploymentProvinceId(provinceId)
   }
   const [activeTab, setActiveTab] = useState<'construction' | 'stockpile' | 'production' | 'diplomacy' | 'generals'>('construction')
+  const [leftOpen, setLeftOpen] = useState(false)
+  const [rightOpen, setRightOpen] = useState(false)
   const playerEconomy = hudState.economy?.[PLAYER_COUNTRY_ID] ?? null
   const selectedProvinceId = hudState.selectedProvince?.id ?? null
   const activeDeploymentProvinceId = deploymentProvinceId ?? selectedProvinceId ?? hudState.training.validDeploymentProvinceIds[0] ?? null
@@ -376,30 +378,33 @@ function App() {
       {/* Side Panel */}
       <aside className="side-panel">
 
-        <div className="panel-section construction-panel">
+        <div className={`panel-section construction-panel ${leftOpen ? 'open' : 'collapsed'}`}>
           <div className="panel-tab-sidebar">
-            <button className={`panel-tab ${activeTab === 'construction' ? 'active' : ''}`} onClick={() => setActiveTab('construction')} title="Construction">
+            <button className={`panel-tab ${activeTab === 'construction' ? 'active' : ''}`} onClick={() => { setLeftOpen(true); setActiveTab('construction') }} title="Construction">
               <Hammer size={16} />
               <span>Build</span>
             </button>
-            <button className={`panel-tab ${activeTab === 'production' ? 'active' : ''}`} onClick={() => setActiveTab('production')} title="Production">
+            <button className={`panel-tab ${activeTab === 'production' ? 'active' : ''}`} onClick={() => { setLeftOpen(true); setActiveTab('production') }} title="Production">
               <PencilRuler size={16} />
               <span>Prod</span>
             </button>
-            <button className={`panel-tab ${activeTab === 'stockpile' ? 'active' : ''}`} onClick={() => setActiveTab('stockpile')} title="Stockpile">
+            <button className={`panel-tab ${activeTab === 'stockpile' ? 'active' : ''}`} onClick={() => { setLeftOpen(true); setActiveTab('stockpile') }} title="Stockpile">
               <Factory size={16} />
               <span>Stock</span>
             </button>
-            <button className={`panel-tab ${activeTab === 'diplomacy' ? 'active' : ''}`} onClick={() => setActiveTab('diplomacy')} title="Diplomacy">
+            <button className={`panel-tab ${activeTab === 'diplomacy' ? 'active' : ''}`} onClick={() => { setLeftOpen(true); setActiveTab('diplomacy') }} title="Diplomacy">
               <Handshake size={16} />
               <span>Diplo</span>
             </button>
-            <button className={`panel-tab ${activeTab === 'generals' ? 'active' : ''}`} onClick={() => setActiveTab('generals')} title="Generals">
+            <button className={`panel-tab ${activeTab === 'generals' ? 'active' : ''}`} onClick={() => { setLeftOpen(true); setActiveTab('generals') }} title="Generals">
               <Shield size={16} />
               <span>Gens</span>
             </button>
+            <button className="panel-tab collapse-toggle" onClick={() => setLeftOpen(!leftOpen)} title={leftOpen ? 'Collapse' : 'Expand'}>
+              {leftOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+            </button>
           </div>
-          <div key={activeTab} className="panel-tab-content">
+          <div key={activeTab} className={`panel-tab-content ${leftOpen ? 'visible' : ''}`}>
           {activeTab === 'construction' ? (
             <>
               <div className="building-summary">
@@ -496,67 +501,79 @@ function App() {
           </div>
         </div>
 
-        {!hudState.selectedUnit ? <div className="panel-section training-panel">
-          <div className="section-header">
-            <PencilRuler className="section-icon-svg" size={16} />
-            <span className="header-title">DIVISIONS</span>
-          </div>
-          <div className="building-summary">
-            <span>Training {hudState.training.activeTrainingCount}/{hudState.training.trainingSlots}</span>
-            <span>Equipment {playerEconomy ? Math.round(playerEconomy.equipmentPool) : 0}</span>
-          </div>
-          <select
-            className="deployment-select"
-            value={activeDeploymentProvinceId ?? ''}
-            onChange={(event) => setDeploymentProvinceId(Number(event.target.value))}
-          >
-            {hudState.training.validDeploymentProvinceIds.map((provinceId) => (
-              <option key={provinceId} value={provinceId}>
-                Province {provinceId}
-              </option>
-            ))}
-          </select>
-          <div className="template-list">
-            {hudState.training.templates.map((template) => (
-              <div key={template.id} className="template-card">
-                <div>
-                  <span className="queue-title">{template.name}</span>
-                  <span className="queue-subtitle">
-                    MP {template.stats.manpower} / EQ {template.stats.equipment} / SPD {Math.round(template.stats.speed)}
-                  </span>
-                </div>
-                <button className="management-btn small" onClick={() => queueTraining(template.id)}>
-                  <Plus size={14} />
-                  Train
-                </button>
-                <button className="management-btn small secondary" onClick={() => openDesignerForTemplate(template)}>
-                  <Edit3 size={14} />
-                  Edit
+        {!hudState.selectedUnit ? (
+          rightOpen ? (
+            <div className="panel-section training-panel open">
+              <div className="section-header">
+                <PencilRuler className="section-icon-svg" size={16} />
+                <span className="header-title">DIVISIONS</span>
+                <button className="icon-btn" onClick={() => setRightOpen(false)} title="Collapse">
+                  <ChevronRight size={14} />
                 </button>
               </div>
-            ))}
-          </div>
-          <button className="designer-open-btn" onClick={openNewDesigner}>
-            <PencilRuler size={15} />
-            Open Division Designer
-          </button>
-          <div className="queue-list">
-            {hudState.training.jobs.length > 0 ? hudState.training.jobs.map((job) => (
-              <div key={job.id} className="queue-item">
-                <div>
-                  <span className="queue-title">{job.templateName}</span>
-                  <span className="queue-subtitle">{job.status === 'ready' ? 'Ready for deployment' : `${job.provinceName}`}</span>
-                </div>
-                <div className="queue-controls">
-                  <span>{job.status === 'ready' ? 'Ready' : `${job.daysRemaining}d`}</span>
-                  <button className="icon-btn" onClick={() => prototypeRef.current?.cancelTraining(job.id)} title="Cancel training">
-                    <X size={14} />
-                  </button>
-                </div>
+              <div className="building-summary">
+                <span>Training {hudState.training.activeTrainingCount}/{hudState.training.trainingSlots}</span>
+                <span>Equipment {playerEconomy ? Math.round(playerEconomy.equipmentPool) : 0}</span>
               </div>
-            )) : <div className="empty-state compact">No divisions training</div>}
-          </div>
-        </div> : <UnitManagementPanel unit={hudState.selectedUnit} logistics={hudState.logistics} />}
+              <select
+                className="deployment-select"
+                value={activeDeploymentProvinceId ?? ''}
+                onChange={(event) => setDeploymentProvinceId(Number(event.target.value))}
+              >
+                {hudState.training.validDeploymentProvinceIds.map((provinceId) => (
+                  <option key={provinceId} value={provinceId}>
+                    Province {provinceId}
+                  </option>
+                ))}
+              </select>
+              <div className="template-list">
+                {hudState.training.templates.map((template) => (
+                  <div key={template.id} className="template-card">
+                    <div>
+                      <span className="queue-title">{template.name}</span>
+                      <span className="queue-subtitle">
+                        MP {template.stats.manpower} / EQ {template.stats.equipment} / SPD {Math.round(template.stats.speed)}
+                      </span>
+                    </div>
+                    <button className="management-btn small" onClick={() => queueTraining(template.id)}>
+                      <Plus size={14} />
+                      Train
+                    </button>
+                    <button className="management-btn small secondary" onClick={() => openDesignerForTemplate(template)}>
+                      <Edit3 size={14} />
+                      Edit
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button className="designer-open-btn" onClick={openNewDesigner}>
+                <PencilRuler size={15} />
+                Open Division Designer
+              </button>
+              <div className="queue-list">
+                {hudState.training.jobs.length > 0 ? hudState.training.jobs.map((job) => (
+                  <div key={job.id} className="queue-item">
+                    <div>
+                      <span className="queue-title">{job.templateName}</span>
+                      <span className="queue-subtitle">{job.status === 'ready' ? 'Ready for deployment' : `${job.provinceName}`}</span>
+                    </div>
+                    <div className="queue-controls">
+                      <span>{job.status === 'ready' ? 'Ready' : `${job.daysRemaining}d`}</span>
+                      <button className="icon-btn" onClick={() => prototypeRef.current?.cancelTraining(job.id)} title="Cancel training">
+                        <X size={14} />
+                      </button>
+                    </div>
+                  </div>
+                )) : <div className="empty-state compact">No divisions training</div>}
+              </div>
+            </div>
+          ) : (
+            <button className="panel-toggle-right" onClick={() => setRightOpen(true)} title="Open Divisions Panel">
+              <PencilRuler size={18} />
+              <span>DIV</span>
+            </button>
+          )
+        ) : <UnitManagementPanel unit={hudState.selectedUnit} logistics={hudState.logistics} />}
 
         {/* Selected Province */}
         {hudState.selectedProvince && (
