@@ -215,6 +215,7 @@ export class StrategyPrototype {
   private readonly container: HTMLDivElement
   private readonly setHudState: HudCallback
   private readonly onSelectTrainingProvince?: (provinceId: number) => void
+  private readonly onClosePanels?: () => void
   private readonly scene = new THREE.Scene()
   private readonly raycaster = new THREE.Raycaster()
   private readonly pointer = new THREE.Vector2()
@@ -277,10 +278,11 @@ export class StrategyPrototype {
   private nextBattleEffectSerial = 1
   private readonly HUD_UPDATE_INTERVAL = 0.15
 
-  constructor(container: HTMLDivElement, setHudState: HudCallback, onSelectTrainingProvince?: (provinceId: number) => void) {
+  constructor(container: HTMLDivElement, setHudState: HudCallback, onSelectTrainingProvince?: (provinceId: number) => void, onClosePanels?: () => void) {
     this.container = container
     this.setHudState = setHudState
     this.onSelectTrainingProvince = onSelectTrainingProvince
+    this.onClosePanels = onClosePanels
   }
 
   async start(): Promise<void> {
@@ -1063,6 +1065,8 @@ export class StrategyPrototype {
   private handleRightClick(event: PointerEvent): void {
     event.preventDefault()
     event.stopPropagation()
+
+    this.onClosePanels?.()
 
     if (!this.provinceState || !this.pathfinding || this.selectedUnitIds.size === 0) {
       return

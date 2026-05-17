@@ -237,6 +237,9 @@ function App() {
 
     const prototype = new StrategyPrototype(mount, setHudState, (provinceId) => {
       onSelectTrainingProvinceRef.current?.(provinceId)
+    }, () => {
+      setLeftOpen(false)
+      setRightOpen(false)
     })
     prototypeRef.current = prototype
     void prototype.start()
