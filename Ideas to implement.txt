@@ -1,1 +1,3 @@
 manpower must be based on province amount 
+
+re check casuality speed
