@@ -1099,8 +1099,12 @@ export class StrategyPrototype {
 
     const targetProvince = this.provinceState.getProvince(targetProvinceId)
 
-    if (targetProvince.controllerCountryId !== unit.countryId && !this.diplomacySystem.areAtWar(unit.countryId, targetProvince.controllerCountryId)) {
-      return false
+    if (targetProvince.controllerCountryId !== unit.countryId) {
+      if (!this.diplomacySystem.areAtWar(unit.countryId, targetProvince.controllerCountryId)) {
+        // Automatic war declaration when crossing into foreign territory
+        this.diplomacySystem.declareWar(unit.countryId, targetProvince.controllerCountryId, this.currentDay)
+        this.updateHud(`${unit.countryId === 'azerbaijan' ? 'Azerbaijan' : 'Armenia'} declared war on ${targetProvince.controllerCountryId}!`)
+      }
     }
 
     const path = this.pathfinding.findPath(unit.provinceId, targetProvince.id)
