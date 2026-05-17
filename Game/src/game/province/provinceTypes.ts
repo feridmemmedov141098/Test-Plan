@@ -1,8 +1,8 @@
 import * as THREE from 'three'
 import type { ProvinceBuildings } from '../economy/ConstructionTypes'
 
-export const PROVINCE_MAP_URL = '/data/maps/Map.glb'
-export const UNIT_MODEL_URL = '/data/maps/Unit_A.glb'
+export const PROVINCE_MAP_URL = 'data/maps/Map.glb'
+export const UNIT_MODEL_URL = 'data/maps/Unit_A.glb'
 
 export type CountryId = 'azerbaijan' | 'armenia'
 export type ResourceId = 'oil' | 'gas' | 'metal' | 'food' | 'industry' | 'energy' | 'manpower' | 'ammunition'
