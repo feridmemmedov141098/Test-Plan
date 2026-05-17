@@ -129,7 +129,7 @@ function DiplomacyPanel({ prototypeRef, currentDay }: { prototypeRef: React.Muta
   )
 }
 
-function GeneralsPanel({ prototypeRef }: { prototypeRef: React.MutableRefObject<StrategyPrototype | null> }) {
+function GeneralsPanel({ prototypeRef, onSetFrontline }: { prototypeRef: React.MutableRefObject<StrategyPrototype | null>; onSetFrontline: (generalId: string | null) => void }) {
   const [generals, setGenerals] = useState<import('./game/generals/GeneralTypes').General[]>([])
   const [trainingQueue, setTrainingQueue] = useState<import('./game/generals/GeneralSystem').GeneralTrainingJob[]>([])
   const [selectedGeneralId, setSelectedGeneralId] = useState<string | null>(null)
@@ -204,6 +204,8 @@ function GeneralsPanel({ prototypeRef }: { prototypeRef: React.MutableRefObject<
             </div>
             {selectedGeneralId === general.id && (
               <div className="general-actions">
+                <button className="management-btn small" onClick={(e) => { e.stopPropagation(); onSetFrontline(general.id) }}>Set Frontline</button>
+                <button className="management-btn small" onClick={(e) => { e.stopPropagation(); prototypeRef.current?.setGeneralFrontline(general.id, []) }}>Clear Frontline</button>
                 <button className="management-btn small" onClick={(e) => { e.stopPropagation(); prototypeRef.current?.cancelGeneralBattlePlan(general.id) }}>Cancel Plan</button>
                 <button className="management-btn small danger" onClick={(e) => { e.stopPropagation(); prototypeRef.current?.dismissGeneral(general.id); setSelectedGeneralId(null) }}>Dismiss</button>
               </div>
@@ -252,6 +254,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<'construction' | 'stockpile' | 'production' | 'diplomacy' | 'generals'>('construction')
   const [leftOpen, setLeftOpen] = useState(false)
   const [rightOpen, setRightOpen] = useState(false)
+  const [frontlineDrawingGeneralId, setFrontlineDrawingGeneralId] = useState<string | null>(null)
   const playerEconomy = hudState.economy?.[PLAYER_COUNTRY_ID] ?? null
   const selectedProvinceId = hudState.selectedProvince?.id ?? null
   const activeDeploymentProvinceId = deploymentProvinceId ?? selectedProvinceId ?? hudState.training.validDeploymentProvinceIds[0] ?? null
@@ -512,7 +515,7 @@ function App() {
           ) : activeTab === 'diplomacy' ? (
             <DiplomacyPanel prototypeRef={prototypeRef} currentDay={hudState.time.day} />
           ) : activeTab === 'generals' ? (
-            <GeneralsPanel prototypeRef={prototypeRef} />
+            <GeneralsPanel prototypeRef={prototypeRef} onSetFrontline={setFrontlineDrawingGeneralId} />
           ) : (
             <ProductionPanel
               production={hudState.production}
@@ -599,12 +602,26 @@ function App() {
           )
         ) : <UnitManagementPanel unit={hudState.selectedUnit} logistics={hudState.logistics} />}
 
+        {/* Frontline Drawing Banner */}
+        {frontlineDrawingGeneralId && (
+          <div className="panel-section frontline-banner">
+            <span className="frontline-label">Drawing frontline for {(() => {
+              const g = prototypeRef.current?.getAllGenerals().find((gen) => gen.id === frontlineDrawingGeneralId)
+              return g?.name ?? 'General'
+            })()}</span>
+            <button className="frontline-done-btn" onClick={() => setFrontlineDrawingGeneralId(null)}>Done</button>
+          </div>
+        )}
+
         {/* Selected Province */}
         {hudState.selectedProvince && (
         <div className="panel-section province-panel">
           <div className="section-header">
             <MapPin className="section-icon-svg" size={16} />
             <span className="header-title">PROVINCE</span>
+            {frontlineDrawingGeneralId && (
+              <span className="frontline-mode-badge">Frontline Mode</span>
+            )}
           </div>
           <div className="province-details">
             <div className="province-name">{hudState.selectedProvince.name}</div>
@@ -652,6 +669,25 @@ function App() {
                   B {hudState.selectedProvince.buildings.barracks} / MC {hudState.selectedProvince.buildings.militaryComplex}
                 </span>
               </div>
+              {frontlineDrawingGeneralId && (() => {
+                const general = prototypeRef.current?.getAllGenerals().find((g) => g.id === frontlineDrawingGeneralId)
+                const isOnFrontline = general?.frontlineProvinceIds.includes(hudState.selectedProvince!.id) ?? false
+                return (
+                  <div className="frontline-actions">
+                    {isOnFrontline ? (
+                      <button className="management-btn small danger" onClick={() => {
+                        const current = general?.frontlineProvinceIds ?? []
+                        prototypeRef.current?.setGeneralFrontline(frontlineDrawingGeneralId, current.filter((id) => id !== hudState.selectedProvince!.id))
+                      }}>Remove from Frontline</button>
+                    ) : (
+                      <button className="management-btn small" onClick={() => {
+                        const current = general?.frontlineProvinceIds ?? []
+                        prototypeRef.current?.setGeneralFrontline(frontlineDrawingGeneralId, [...current, hudState.selectedProvince!.id])
+                      }}>Add to Frontline</button>
+                    )}
+                  </div>
+                )
+              })()}
             </div>
           </div>
         )}
