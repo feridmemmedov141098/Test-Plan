@@ -84,7 +84,7 @@ export class CombatSystem {
       }
     }
 
-    this.reinforceUnits(units, economy)
+    this.reinforceUnits(units, economy, provinces)
     return resolutions
   }
 
@@ -188,7 +188,7 @@ export class CombatSystem {
     }
   }
 
-  private reinforceUnits(units: UnitState[], economy: EconomySystem): void {
+  private reinforceUnits(units: UnitState[], economy: EconomySystem, provinces: Province[]): void {
     for (const unit of units) {
       if (unit.status === 'inCombat' || unit.manpower <= 0) {
         continue
@@ -199,21 +199,42 @@ export class CombatSystem {
         continue
       }
 
-      recoverBattalionOrganization(unit, 5 / 24)
-      unit.organization = unit.battalions.reduce((sum, battalion) => sum + battalion.organization, 0) / Math.max(1, unit.battalions.length)
+      const province = provinces[unit.provinceId]
+      const hasSupplyAccess = !unit.isEncircled && unit.supplyHours > 0
+      const inFriendlyTerritory = province && province.controllerCountryId === unit.countryId && !province.isContested
 
-      const manpowerNeed = unit.maxManpower - unit.manpower
-      const equipmentNeed = unit.maxEquipment - unit.equipment
-      const manpowerReinforced = economy.spendManpower(unit.countryId, Math.min(manpowerNeed, unit.maxManpower * 0.03 / 24))
-      const equipmentReinforcedLegacy = economy.spendEquipment(unit.countryId, Math.min(equipmentNeed, unit.maxEquipment * 0.015 / 24))
-      const equipmentFillRatio = economy.spendAvailableEquipmentStockpiles(unit.countryId, getUnitEquipmentNeed(unit), 0.03 / 24)
-      const equipmentReinforced = Math.min(equipmentNeed, equipmentReinforcedLegacy + unit.maxEquipment * 0.03 / 24 * equipmentFillRatio)
+      if (hasSupplyAccess) {
+        recoverBattalionOrganization(unit, 5 / 24)
+        unit.organization = unit.battalions.reduce((sum, battalion) => sum + battalion.organization, 0) / Math.max(1, unit.battalions.length)
 
-      reinforceBattalions(unit, manpowerReinforced, equipmentReinforced)
-      recalculateUnitFromBattalions(unit)
+        const manpowerNeed = unit.maxManpower - unit.manpower
+        const equipmentNeed = unit.maxEquipment - unit.equipment
+        const manpowerReinforced = economy.spendManpower(unit.countryId, Math.min(manpowerNeed, unit.maxManpower * 0.03 / 24))
+        const equipmentReinforcedLegacy = economy.spendEquipment(unit.countryId, Math.min(equipmentNeed, unit.maxEquipment * 0.015 / 24))
+        const equipmentFillRatio = economy.spendAvailableEquipmentStockpiles(unit.countryId, getUnitEquipmentNeed(unit), 0.03 / 24)
+        const equipmentReinforced = Math.min(equipmentNeed, equipmentReinforcedLegacy + unit.maxEquipment * 0.03 / 24 * equipmentFillRatio)
 
-      if (unit.organization >= unit.maxOrganization && unit.manpower >= unit.maxManpower && unit.equipment >= unit.maxEquipment) {
-        unit.status = 'idle'
+        let totalManpower = manpowerReinforced
+        if (inFriendlyTerritory) {
+          totalManpower += Math.min(manpowerNeed - manpowerReinforced, unit.maxManpower * 0.03 / 24 / 8)
+        }
+
+        reinforceBattalions(unit, totalManpower, equipmentReinforced)
+        recalculateUnitFromBattalions(unit)
+
+        if (unit.organization >= unit.maxOrganization && unit.manpower >= unit.maxManpower && unit.equipment >= unit.maxEquipment) {
+          unit.status = 'idle'
+        }
+      } else if (inFriendlyTerritory) {
+        const manpowerNeed = unit.maxManpower - unit.manpower
+        const localManpower = Math.min(manpowerNeed, unit.maxManpower * 0.03 / 24 / 8)
+        if (localManpower > 0) {
+          reinforceBattalions(unit, localManpower, 0)
+          recalculateUnitFromBattalions(unit)
+        }
+        if (unit.manpower >= unit.maxManpower && unit.equipment >= unit.maxEquipment && unit.organization >= unit.maxOrganization) {
+          unit.status = 'idle'
+        }
       }
     }
   }
