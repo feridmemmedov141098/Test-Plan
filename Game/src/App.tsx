@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bomb, Edit3, Factory, Flame, Fuel, Hammer, PencilRuler, Pickaxe, Plus, Save, Swords, Trash2, Users, Wheat, X, Zap } from 'lucide-react'
+import { Bomb, Edit3, Factory, Flame, Fuel, Hammer, MapPin, PencilRuler, Pickaxe, Plus, Save, Swords, Trash2, Users, Wheat, X, Zap } from 'lucide-react'
 import './App.css'
 import { EQUIPMENT_CATEGORIES, EQUIPMENT_LABELS, FACTORY_OUTPUT_BASE, MAX_FACTORY_COUNT_PER_LINE, PRODUCIBLE_CATEGORIES, PRODUCIBLE_LABELS, type EquipmentCategory, type ProducibleCategory } from './game/equipment/EquipmentTypes'
 import { BUILDING_DEFINITIONS, type BuildingType } from './game/economy/ConstructionTypes'
@@ -155,7 +155,7 @@ function App() {
       <header className="top-bar">
         <div className="top-bar-left">
           <div className="game-title">
-            <span className="title-icon">⚔</span>
+            <Swords className="title-icon" size={20} />
             <span>CAUCASUS COMMAND</span>
           </div>
           <div className="game-status">
@@ -408,7 +408,7 @@ function App() {
         {hudState.selectedProvince && (
         <div className="panel-section province-panel">
           <div className="section-header">
-            <span className="header-icon">📍</span>
+            <MapPin className="section-icon-svg" size={16} />
             <span className="header-title">PROVINCE</span>
           </div>
           <div className="province-details">
@@ -475,7 +475,7 @@ function App() {
         {showLegacyUnitPanel && hudState.selectedUnit && !hudState.battleForecast && (
           <div className="panel-section unit-panel">
             <div className="section-header">
-              <span className="header-icon">🎖</span>
+              <Swords className="section-icon-svg" size={16} />
               <span className="header-title">UNIT</span>
             </div>
             <div className="unit-details">
@@ -579,7 +579,7 @@ function App() {
         {hudState.activeCombat && !hudState.battleForecast && (
           <div className="panel-section combat-section">
             <div className="section-header">
-              <span className="header-icon">💥</span>
+              <Flame className="section-icon-svg" size={16} />
               <span className="header-title">BATTLE</span>
             </div>
             <div className="combat-details">
@@ -597,7 +597,7 @@ function App() {
         {showLegacyEconomyPanel && hudState.economy && (
           <div className="panel-section">
             <div className="section-header">
-              <span className="header-icon">💰</span>
+              <Factory className="section-icon-svg" size={16} />
               <span className="header-title">ECONOMY</span>
             </div>
             <div className="economy-sections">
@@ -843,7 +843,7 @@ function UnitManagementPanel({ unit, logistics }: { unit: NonNullable<PrototypeH
   return (
     <div className="panel-section training-panel unit-management-panel">
       <div className="section-header">
-        <span className="header-icon">ðŸŽ–</span>
+        <Swords className="section-icon-svg" size={16} />
         <span className="header-title">UNIT</span>
       </div>
       <div className="unit-details">
