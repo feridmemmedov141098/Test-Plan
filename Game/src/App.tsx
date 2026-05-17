@@ -1293,7 +1293,7 @@ function formatTerrainName(terrainType: string): string {
 
 function formatModifier(value: number): string {
   const sign = value >= 0 ? '+' : ''
-  return `${sign}${value}%`
+  return `${sign}${value.toFixed(2)}`
 }
 
 function formatDelta(delta: number): string {
